@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.0.4 — 2026-09-06
 
 - Installer now resolves the latest supported `opnsense-awg-kmod` and `opnsense-awg-tools` releases independently. Kernel-only updates no longer require republishing or renumbering the unchanged tools package, and userspace-only updates no longer require a matching kmod version bump.
 

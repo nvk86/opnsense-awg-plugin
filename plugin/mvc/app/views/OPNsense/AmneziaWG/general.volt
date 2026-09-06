@@ -28,6 +28,12 @@
             $('.selectpicker').selectpicker('refresh');
         });
 
+        // Remove stale command tooltips after closing AWG edit dialogs.
+        $('#{{formGridInstance['edit_dialog_id']}}, #{{formGridServer['edit_dialog_id']}}, #{{formGridPeer['edit_dialog_id']}}')
+            .on('hidden.bs.modal', function () {
+                $('.tooltip').remove();
+            });
+
         // ── Tunnels grid ──────────────────────────────────────────────
         // Per-row runtime control: Start/Stop one tunnel without touching
         // the others. A per-row Stop sets a per-instance flag so the
@@ -213,27 +219,37 @@
                 }} }
         );
 
-        // Replace the raw server UUID field with a server selector while keeping
-        // the framework field id/name so normal base_dialog saving still works.
-        $('#{{formGridPeer['edit_dialog_id']}}').on('shown.bs.modal', function () {
-            var $field = $('[id="peer.server"]');
-            if (!$field.length) return;
-            var current = $field.val() || '';
-            ajaxGet('/api/amneziawg/peer/servers', {}, function (data) {
-                var $sel;
-                if ($field.is('select')) {
-                    $sel = $field.empty();
-                } else {
-                    $sel = $('<select class="form-control" id="peer.server" name="peer[server]"></select>');
-                    $field.replaceWith($sel);
-                }
-                $sel.append($('<option>').val('').text('{{ lang._("Select server") }}'));
-                (data.rows || []).forEach(function (row) {
-                    $sel.append($('<option>').val(row.uuid).text(row.name + ' — ' + row.interface));
-                });
-                $sel.val(current);
+        // Keep the framework-managed peer.server field intact.  A separate
+        // selector provides the UI and mirrors its value back to the real field.
+        // Replacing the framework field breaks subsequent dialog mappings.
+        var $peerServerField = $('#{{formGridPeer['edit_dialog_id']}}').find('[id="peer.server"]');
+        var $peerServerSelect = $('<select class="form-control" id="peer.server_selector"></select>');
+
+        if ($peerServerField.length) {
+            $peerServerField.hide();
+            $peerServerSelect.insertAfter($peerServerField);
+
+            $peerServerSelect.on('change', function () {
+                $peerServerField.val($(this).val());
             });
-        });
+
+            $('#{{formGridPeer['edit_dialog_id']}}').on('shown.bs.modal', function () {
+                var current = $peerServerField.val() || '';
+                $peerServerSelect.empty();
+                $peerServerSelect.append(
+                    $('<option>').val('').text('{{ lang._("Select server") }}')
+                );
+
+                ajaxGet('/api/amneziawg/peer/servers', {}, function (data) {
+                    (data.rows || []).forEach(function (row) {
+                        $peerServerSelect.append(
+                            $('<option>').val(row.uuid).text(row.name + ' — ' + row.interface)
+                        );
+                    });
+                    $peerServerSelect.val(current);
+                });
+            });
+        }
 
         // Client provisioning for a server peer. The private key is never
         // stored in config.xml; it is submitted once and persisted by the API
@@ -314,10 +330,9 @@
 
                     function renderQr(chunks) {
                         $qr.empty().qrcode({
-                            text: chunks[qrIndex],
-                            width: 256,
-                            height: 256,
-                            correctLevel: QRErrorCorrectLevel.L
+                            data: chunks[qrIndex],
+                            errorCorrectionLevel: 'L',
+                            cellSize: 3
                         });
                         if (chunks.length > 1) {
                             $progress.text('{{ lang._("QR chunk") }} ' + (qrIndex + 1) + ' / ' + chunks.length);

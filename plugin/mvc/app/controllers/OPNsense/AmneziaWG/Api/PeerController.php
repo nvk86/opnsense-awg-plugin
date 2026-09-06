@@ -131,7 +131,9 @@ class PeerController extends ApiMutableModelControllerBase
         foreach(['random_trailers'=>'RandomTrailers','disable_cookies'=>'DisableCookies'] as $f=>$label){$v=(string)$server->$f;if($v==='1')$rows[]=$label.' = on';}
         $rows[]='';$rows[]='[Peer]';$rows[]='PublicKey = '.$serverPublic['key'];
         if(trim((string)$peer->preshared_key)!=='')$rows[]='PresharedKey = '.trim((string)$peer->preshared_key);
-        $keepalive=trim((string)$server->clients_keepalive);if($keepalive==='')$keepalive='25';
+        $keepalive=trim((string)$peer->persistent_keepalive);
+        if($keepalive==='')$keepalive=trim((string)$server->clients_keepalive);
+        if($keepalive==='')$keepalive='25';
         $rows[]='Endpoint = '.$endpoint;$rows[]='AllowedIPs = 0.0.0.0/0';$rows[]='PersistentKeepalive = '.$keepalive;
         $name=preg_replace('/[^A-Za-z0-9_.-]+/','_',trim((string)$peer->name));if($name==='')$name='amneziawg-client';
         $config=implode("\n",$rows)."\n";

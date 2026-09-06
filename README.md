@@ -75,9 +75,9 @@ The original copyright notice and BSD 2-Clause License are retained in [LICENSE]
 
 ## Installer and package handling
 
-The v2.0.2 installer uses the project-owned AWG 3.x package pair and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for both repositories, requires both to remain in major version 3 and requires their upstream protocol versions to match. Package revisions such as `_1` are allowed.
+The v2.0.3 installer uses the project-owned AWG 3.x package pair and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for both repositories, requires both to remain in major version 3 and requires their upstream protocol versions to match. Package revisions such as `_1` are allowed.
 
-Current compatible releases at v2.0.2 release time:
+Current compatible releases at v2.0.3 release time:
 
 | Package | Version |
 |---|---|
@@ -239,7 +239,7 @@ This keeps the VPN service lifecycle separate from OPNsense security policy.
 
 ## Updating
 
-Run the `install.sh` from the new release directory as root. The v2.0.2 installer is also the migration path from v1.0.0/AWG2; do not manually replace the kernel module or userspace binaries first.
+Run the `install.sh` from the new release directory as root. The v2.0.3 installer is also the migration path from v1.0.0/AWG2; do not manually replace the kernel module or userspace binaries first.
 
 The installer resolves the latest compatible AWG 3.x releases on every install/repair run. It requires kmod and tools to have the same upstream protocol version (package revision suffixes such as `_1` may differ), downloads the matching `.pkg.sha256` assets, verifies both package hashes and manifests before mutation, and refuses an incompatible latest pair rather than silently mixing versions.
 

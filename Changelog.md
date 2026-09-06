@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.3 — 2026-09-06
+
+- Fixed generated Server Peer client configurations to honor the peer-specific PersistentKeepalive value before falling back to the server default.
+- Updated QR rendering for the current OPNsense jquery.qrcode API.
+- Fixed edit dialogs becoming unresponsive after being closed on touch browsers.
+- Fixed repeated Server Peer editing by keeping the framework-managed peer.server field intact and using a synchronized UI selector.
+
 ## v2.0.2 — 2026-09-06
 
 - Fixed PHP namespace escaping in installer state detection, preventing a spurious OPNsense crash-report entry during installation.

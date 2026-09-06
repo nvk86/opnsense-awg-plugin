@@ -1,10 +1,10 @@
 #!/bin/sh
-# opnsense-awg v2.0.4 installer
+# opnsense-awg v2.0.5 installer
 # Migrates the legacy FreeBSD amnezia-kmod/amnezia-tools AWG2 stack to the
 # project-owned AWG 3.1 packages, preserving OPNsense configuration and keys.
 set -eu
 
-PLUGIN_VERSION="2.0.4"
+PLUGIN_VERSION="2.0.5"
 KMOD_REPO="nvk86/opnsense-awg-kmod"
 TOOLS_REPO="nvk86/opnsense-awg-tools"
 KMOD_VERSION=""
@@ -123,6 +123,7 @@ backup_file_tree(){
     # state touched by the package/module migration in that mode.
     if [ "$MIGRATION_TEST" -eq 1 ]; then
         [ -f /boot/loader.conf ] && cp -p /boot/loader.conf "$TXN_DIR/loader.conf"
+        [ -f /boot/loader.conf.local ] && cp -p /boot/loader.conf.local "$TXN_DIR/loader.conf.local"
         if [ -d /usr/local/etc/amnezia ]; then cp -Rp /usr/local/etc/amnezia "$TXN_DIR/amnezia"; fi
         return 0
     fi
@@ -142,6 +143,7 @@ backup_file_tree(){
     done
     [ -f /conf/config.xml ] && cp -p /conf/config.xml "$TXN_DIR/config.xml"
     [ -f /boot/loader.conf ] && cp -p /boot/loader.conf "$TXN_DIR/loader.conf"
+    [ -f /boot/loader.conf.local ] && cp -p /boot/loader.conf.local "$TXN_DIR/loader.conf.local"
     if [ -d /usr/local/etc/amnezia ]; then cp -Rp /usr/local/etc/amnezia "$TXN_DIR/amnezia"; fi
 }
 
@@ -195,7 +197,20 @@ stop_runtime(){
 
 remove_loader_entries(){
     touch /boot/loader.conf
-    sed -i '' '/^[[:space:]]*if_amn_load=/d;/^[[:space:]]*if_awg_load=/d' /boot/loader.conf
+    for _loader in /boot/loader.conf /boot/loader.conf.local; do
+        [ -f "$_loader" ] || continue
+        sed -i '' '/^[[:space:]]*if_amn_load=/d;/^[[:space:]]*if_awg_load=/d' "$_loader"
+    done
+}
+
+verify_loader_entries(){
+    for _loader in /boot/loader.conf /boot/loader.conf.local; do
+        [ -f "$_loader" ] || continue
+        if grep -q '^[[:space:]]*if_amn_load=' "$_loader"; then
+            die "Legacy if_amn loader entry remains in $_loader"
+        fi
+    done
+    grep -q '^[[:space:]]*if_awg_load="YES"' /boot/loader.conf || die "if_awg loader entry missing from /boot/loader.conf"
 }
 
 migrate_packages(){
@@ -222,6 +237,7 @@ migrate_packages(){
     /sbin/kldload /boot/modules/if_awg.ko >/dev/null 2>&1 || /sbin/kldstat -q -m if_awg >/dev/null 2>&1 || die "if_awg failed to load"
     remove_loader_entries
     printf '%s\n' 'if_awg_load="YES"' >> /boot/loader.conf
+    verify_loader_entries
     log "[OK] AWG 3.1 packages installed and if_awg loaded"
 }
 
@@ -276,6 +292,7 @@ postflight(){
     [ -x /usr/local/bin/awg ] || die "awg binary missing after install"
     [ -x /usr/local/bin/awg-quick ] || die "awg-quick binary missing after install"
     /sbin/kldstat -q -m if_awg >/dev/null 2>&1 || die "if_awg not loaded"
+    verify_loader_entries
     _tools_upstream=${TOOLS_VERSION%%_*}
     /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
     grep -q '\[testconnect\]' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf && die "Obsolete testconnect action is still installed"
@@ -321,6 +338,7 @@ migration_test_postflight(){
     [ "$(pkgq query '%v' opnsense-awg-kmod 2>/dev/null)" = "$KMOD_VERSION" ] || die "Wrong opnsense-awg-kmod version after migration"
     /sbin/kldstat -q -m if_awg >/dev/null 2>&1 || die "if_awg not loaded after migration"
     ! /sbin/kldstat -q -m if_amn >/dev/null 2>&1 || die "Legacy if_amn is still loaded"
+    verify_loader_entries
     _tools_upstream=${TOOLS_VERSION%%_*}
     /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
     pkgq which /usr/local/bin/awg 2>/dev/null | grep -q 'opnsense-awg-tools-' || die "awg is not owned by opnsense-awg-tools"
@@ -349,6 +367,7 @@ restore_rootfs(){
     if [ -d "$TXN_DIR/rootfs" ]; then (cd "$TXN_DIR/rootfs" && tar -cf - .) | (cd / && tar -xpf -) || true; fi
     if [ "$MIGRATION_TEST" -eq 0 ] && [ -f "$TXN_DIR/config.xml" ]; then cp -p "$TXN_DIR/config.xml" /conf/config.xml; fi
     if [ -f "$TXN_DIR/loader.conf" ]; then cp -p "$TXN_DIR/loader.conf" /boot/loader.conf; fi
+    if [ -f "$TXN_DIR/loader.conf.local" ]; then cp -p "$TXN_DIR/loader.conf.local" /boot/loader.conf.local; fi
     if [ -d "$TXN_DIR/amnezia" ]; then rm -rf /usr/local/etc/amnezia; cp -Rp "$TXN_DIR/amnezia" /usr/local/etc/amnezia; fi
 }
 

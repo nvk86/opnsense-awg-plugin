@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed fresh installation on systems with no enabled AmneziaWG instances: installer postflight now accepts the backend's explicit `no enabled instances to validate` result while continuing to fail on all other validation errors.
+
 ## v2.0.0 — 2026-09-04
 
 - Corrected installer postflight handling for deliberately stopped backends and added explicit verification of restored interfaces.

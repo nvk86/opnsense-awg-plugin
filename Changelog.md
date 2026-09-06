@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.2 — 2026-09-06
+
+- Fixed PHP namespace escaping in installer state detection, preventing a spurious OPNsense crash-report entry during installation.
+
+
 ## v2.0.1 — 2026-09-06
 
 - Fixed fresh installation on systems with no enabled AmneziaWG instances: installer postflight now accepts the backend's explicit `no enabled instances to validate` result while continuing to fail on all other validation errors.

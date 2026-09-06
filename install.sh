@@ -1,10 +1,10 @@
 #!/bin/sh
-# opnsense-awg v2.0.1 installer
+# opnsense-awg v2.0.2 installer
 # Migrates the legacy FreeBSD amnezia-kmod/amnezia-tools AWG2 stack to the
 # project-owned AWG 3.1 packages, preserving OPNsense configuration and keys.
 set -eu
 
-PLUGIN_VERSION="2.0.1"
+PLUGIN_VERSION="2.0.2"
 KMOD_REPO="nvk86/opnsense-awg-kmod"
 TOOLS_REPO="nvk86/opnsense-awg-tools"
 KMOD_VERSION=""
@@ -113,7 +113,7 @@ check_platform(){
 
 read_state(){
     if [ -x /usr/local/bin/php ]; then
-        WAS_ENABLED=$(/usr/local/bin/php -r 'require_once("/usr/local/etc/inc/config.inc"); $c=OPNsense\\Core\\Config::getInstance()->object(); echo ((string)($c->OPNsense->amneziawg->general->enabled ?? "0") === "1") ? "1" : "0";' 2>/dev/null || echo 0)
+        WAS_ENABLED=$(/usr/local/bin/php -r 'require_once("/usr/local/etc/inc/config.inc"); $c=OPNsense\Core\Config::getInstance()->object(); echo ((string)($c->OPNsense->amneziawg->general->enabled ?? "0") === "1") ? "1" : "0";' 2>/dev/null || echo 0)
     fi
     if [ -x /usr/local/bin/awg ]; then RUNNING_IFACES=$(/usr/local/bin/awg show interfaces 2>/dev/null || true); fi
     /sbin/kldstat -q -m if_amn >/dev/null 2>&1 && OLD_IF_AMN=1 || true

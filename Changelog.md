@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.5 — 2026-09-06
+
+- Fixed AWG loader cleanup to handle both `/boot/loader.conf` and `/boot/loader.conf.local`. The installer now backs up and restores both files during rollback, removes stale `if_amn_load`/`if_awg_load` entries from either location, writes the canonical `if_awg_load="YES"` entry to `/boot/loader.conf`, and verifies that no legacy `if_amn_load` entry remains.
+
 ## v2.0.4 — 2026-09-06
 
 - Installer now resolves the latest supported `opnsense-awg-kmod` and `opnsense-awg-tools` releases independently. Kernel-only updates no longer require republishing or renumbering the unchanged tools package, and userspace-only updates no longer require a matching kmod version bump.

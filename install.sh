@@ -290,7 +290,13 @@ postflight(){
     _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
     printf '%s\n' "$_st" | grep -Eq '"status":"(ok|stopped)"' || die "configd status smoke test failed: $_st"
     _va=$(/usr/local/sbin/configctl amneziawg validate 2>&1 || true)
-    printf '%s\n' "$_va" | grep -Eq '^OK([[:space:]]|$)' || die "configuration validation failed: $_va"
+    if printf '%s\n' "$_va" | grep -q 'ERROR: no enabled instances to validate'; then
+        log "[OK] No enabled AWG instances configured yet; skipping configuration validation"
+    elif printf '%s\n' "$_va" | grep -Eq '^OK([[:space:]]|$)'; then
+        :
+    else
+        die "configuration validation failed: $_va"
+    fi
 
     mkdir -p "$(dirname "$VERSION_FILE")"
     printf '%s\n' "$PLUGIN_VERSION" > "$VERSION_FILE"
@@ -418,6 +424,7 @@ else
     log " opnsense-awg v$PLUGIN_VERSION / AWG latest compatible 3.x"
 fi
 log "============================================================"
+
 read_state
 resolve_packages
 backup_file_tree

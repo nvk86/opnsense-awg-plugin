@@ -1,10 +1,10 @@
 #!/bin/sh
-# opnsense-awg v2.0.0 installer
+# opnsense-awg v2.0.1 installer
 # Migrates the legacy FreeBSD amnezia-kmod/amnezia-tools AWG2 stack to the
 # project-owned AWG 3.1 packages, preserving OPNsense configuration and keys.
 set -eu
 
-PLUGIN_VERSION="2.0.0"
+PLUGIN_VERSION="2.0.1"
 KMOD_REPO="nvk86/opnsense-awg-kmod"
 TOOLS_REPO="nvk86/opnsense-awg-tools"
 KMOD_VERSION=""

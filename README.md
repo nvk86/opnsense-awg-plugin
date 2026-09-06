@@ -75,13 +75,13 @@ The original copyright notice and BSD 2-Clause License are retained in [LICENSE]
 
 ## Installer and package handling
 
-The v2.0.3 installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
+The v2.0.4 installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
 
-Current compatible releases at v2.0.3 release time:
+Current supported package releases:
 
 | Package | Version |
 |---|---|
-| `opnsense-awg-kmod` | `3.1.20260812_1` |
+| `opnsense-awg-kmod` | `3.1.20260906` |
 | `opnsense-awg-tools` | `3.1.20260812` |
 
 During an upgrade from v1.0.0 the installer resolves `releases/latest`, downloads each `.pkg` together with its matching `.pkg.sha256` asset, verifies the downloaded checksum and package manifest, creates local rollback packages for the currently installed AWG packages, stops plugin-owned tunnels, removes legacy `amnezia-tools` / `amnezia-kmod`, installs the independently resolved project packages, switches the kernel module from `if_amn` to `if_awg`, runs OPNsense model migrations, validates the resulting configuration, and restores interfaces that were running before the transaction. Existing `config.xml` data and `/usr/local/etc/amnezia` key/config files are backed up before the package transaction.
@@ -239,7 +239,7 @@ This keeps the VPN service lifecycle separate from OPNsense security policy.
 
 ## Updating
 
-Run the `install.sh` from the new release directory as root. The v2.0.3 installer is also the migration path from v1.0.0/AWG2; do not manually replace the kernel module or userspace binaries first.
+Run the `install.sh` from the new release directory as root. The v2.0.4 installer is also the migration path from v1.0.0/AWG2; do not manually replace the kernel module or userspace binaries first.
 
 The installer resolves the latest supported AWG 3.x release from each package repository independently on every install/repair run. It downloads each package's matching `.pkg.sha256` asset, verifies hashes and manifests before mutation, and does not require the kmod and tools version strings to match. A kernel-only update therefore requires only a new kmod release, and a tools-only update requires only a new tools release.
 

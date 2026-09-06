@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Installer now resolves the latest supported `opnsense-awg-kmod` and `opnsense-awg-tools` releases independently. Kernel-only updates no longer require republishing or renumbering the unchanged tools package, and userspace-only updates no longer require a matching kmod version bump.
+
 ## v2.0.3 — 2026-09-06
 
 - Fixed generated Server Peer client configurations to honor the peer-specific PersistentKeepalive value before falling back to the server default.

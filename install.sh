@@ -90,9 +90,6 @@ resolve_packages(){
 
     case "$KMOD_VERSION" in 3.*) ;; *) die "Latest kmod release $KMOD_VERSION is outside supported AWG 3.x" ;; esac
     case "$TOOLS_VERSION" in 3.*) ;; *) die "Latest tools release $TOOLS_VERSION is outside supported AWG 3.x" ;; esac
-    _kbase=${KMOD_VERSION%%_*}
-    _tbase=${TOOLS_VERSION%%_*}
-    [ "$_kbase" = "$_tbase" ] || die "Latest kmod/tools protocol versions do not match: $KMOD_VERSION vs $TOOLS_VERSION"
 
     KMOD_PKG="opnsense-awg-kmod-${KMOD_VERSION}.pkg"
     TOOLS_PKG="opnsense-awg-tools-${TOOLS_VERSION}.pkg"
@@ -212,8 +209,8 @@ migrate_packages(){
             pkgq delete -y "$_pkg" >/dev/null || die "Failed to remove legacy $_pkg"
         fi
     done
-    # Reinstall exact project packages even on a v2 repair run; this guarantees
-    # userspace/module parity and removes uncertainty about locally modified files.
+    # Reinstall the independently resolved project packages even on a v2 repair
+    # run; this removes uncertainty about locally modified package files.
     for _pkg in opnsense-awg-tools opnsense-awg-kmod; do
         if have_pkg "$_pkg"; then pkgq unlock -qy "$_pkg" >/dev/null 2>&1 || true; pkgq delete -y "$_pkg" >/dev/null || die "Failed to replace $_pkg"; fi
     done

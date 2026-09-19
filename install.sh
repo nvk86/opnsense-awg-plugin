@@ -296,7 +296,11 @@ postflight(){
     _tools_upstream=${TOOLS_VERSION%%_*}
     /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
     grep -q '\[testconnect\]' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf && die "Obsolete testconnect action is still installed"
-    grep -q '^\[health\]
+    grep -q '^\[health\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Health action missing after install"
+    grep -q '^\[gateway_sync\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync action missing after install"
+    grep -q '^\[gateway_sync_state\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync state action missing after install"
+    grep -q '^\[gateway_sync_release\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync release action missing after install"
+    /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-health.php >/dev/null || die "Health script syntax check failed"
     /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php >/dev/null || die "Gateway sync script syntax check failed"
     grep -Rqs 'if_amn' /usr/local/opnsense/scripts/AmneziaWG /usr/local/etc/rc.syshook.d/start/50-amneziawg && die "Legacy if_amn reference remains in runtime scripts"
     # A healthy backend can legitimately report either "stopped" (no live

@@ -31,6 +31,13 @@
             <pattern>api/amneziawg/service/*</pattern>
         </patterns>
     </acl_amneziawg_service>
+    <acl_amneziawg_metrics>
+        <n>AmneziaWG: Prometheus metrics</n>
+        <description>Allow read-only access to the Prometheus metrics endpoint</description>
+        <patterns>
+            <pattern>api/amneziawg/service/metrics</pattern>
+        </patterns>
+    </acl_amneziawg_metrics>
     <acl_amneziawg_import>
         <n>AmneziaWG: Import configuration</n>
         <description>Allow access to AmneziaWG .conf file import parser</description>

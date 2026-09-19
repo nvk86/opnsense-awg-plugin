@@ -84,4 +84,6 @@ jobs:
           grep -Fq "stale service-level stopped flag remained" install.sh
           grep -Fq "\$connectivity = 'waiting'" plugin/scripts/AmneziaWG/amneziawg-ifstats.php
           grep -Fq 'amneziawg-health.php' plugin/scripts/AmneziaWG/amneziawg-watchdog.php
+          grep -Fq "Tunnel restarted by watchdog; waiting for health recheck" plugin/scripts/AmneziaWG/amneziawg-watchdog.php
+          grep -Fq "wdg_mark_restart(\$row['uuid'], \$decoded)" plugin/scripts/AmneziaWG/amneziawg-watchdog.php
           grep -Fq 'Force Down' README.md

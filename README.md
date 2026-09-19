@@ -25,19 +25,18 @@ AmneziaWG is a WireGuard-compatible VPN protocol with additional traffic obfusca
 
 > This is a third-party community plugin. It is not an official OPNsense or AmneziaVPN component.
 
-## What's new in 2.1.1
+## What's new in 2.2.0
 
-Version **2.1.1** is the current maintenance release for the active health and gateway failover work introduced in 2.1.0.
+Version **2.2.0** focuses on UI consistency and everyday usability.
 
-- **Active per-client health monitoring** probes the AWG data plane instead of treating an existing interface as proof of connectivity.
-- **Gateway Health Sync** maps verified tunnel health to the native OPNsense gateway `Force Down` state, so Gateway Groups and policy-routing rules can fail over without `dpinger`.
-- Health uses a **three-failure debounce** before forcing a gateway down and clears `Force Down` after a successful recovery probe.
-- The optional **Watchdog** restarts only the unhealthy client tunnel after the same threshold and applies a **10-minute per-client restart cooldown**.
-- General shows aggregate health, Clients shows health for each individual tunnel, and Diagnostics exposes probe, gateway and PF routing state.
-- **2.1.1 fixes post-install/post-restart `waiting` states** by asking OPNsense to reconcile its native gateway route when an `awgN` interface has been recreated and the gateway itself is still Online.
-- Forced-down recovery uses a temporary runtime-only /32 probe route only when necessary; permanent gateway-route ownership remains with OPNsense.
+- General now uses compact aggregate **Clients / Servers / Health** status badges and consistent **Start All / Stop All / Restart All** controls.
+- Server Peer provisioning exposes **QR Code** and **Download .conf** directly in the peer table.
+- Diagnostics use clearer state badges, and Logs are split into **Service Log** and **Watchdog Log** views.
+- Configuration fields now include concise help text throughout the client, server and peer editors.
 
-See [RELEASE_NOTES.md](RELEASE_NOTES.md) and [Changelog.md](Changelog.md) for the full release details.
+No AmneziaWG configuration migration is required from 2.1.1.
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) and [Changelog.md](Changelog.md) for the release summary.
 
 ## Upstream and attribution
 
@@ -92,7 +91,7 @@ The original copyright notice and BSD 2-Clause License are retained in [LICENSE]
 
 ## Installer and package handling
 
-The v2.1.1 installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
+The v2.2.0 installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
 
 Current supported package releases:
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.3.0 — 2026-09-19
+
+- Added native read-only Prometheus exposition at `/api/amneziawg/service/metrics`.
+- Added service, client/server runtime, cached active-health, watchdog, Gateway Health Sync, latency/failure timestamp and handshake metrics.
+- Prometheus scrapes are passive and never initiate an active health probe or mutate runtime/gateway state.
+- Added a dedicated monitoring ACL privilege and corrected the ACL metadata to the OPNsense `<name>` format.
+- Installer now invalidates the OPNsense ACL cache after install, rollback and uninstall.
+- Metric labels avoid keys, endpoints, health targets and internal instance UUIDs.
+- No configuration migration is required from 2.2.0.
+
 ## v2.2.0 — 2026-09-19
 
 - Unified General status/actions, Server Peer provisioning actions, Diagnostics state presentation and log views.

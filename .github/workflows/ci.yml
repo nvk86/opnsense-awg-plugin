@@ -42,5 +42,8 @@ jobs:
           grep -Fq '<gateway_health_sync type="BooleanField">' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
           grep -Fq '[health]' plugin/service/conf/actions.d/actions_amneziawg.conf
           grep -Fq '[gateway_sync]' plugin/service/conf/actions.d/actions_amneziawg.conf
+          grep -Fq '[gateway_sync_state]' plugin/service/conf/actions.d/actions_amneziawg.conf
+          grep -Fq '[gateway_sync_release]' plugin/service/conf/actions.d/actions_amneziawg.conf
+          grep -Fq 'amneziawg gateway_sync_release' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/InstanceController.php
           grep -Fq 'amneziawg-health.php' plugin/scripts/AmneziaWG/amneziawg-watchdog.php
           grep -Fq 'Force Down' README.md

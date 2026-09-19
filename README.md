@@ -2,7 +2,7 @@
 
 **AmneziaWG Client + Server plugin for OPNsense**
 
-`opnsense-awg-plugin` integrates AmneziaWG into OPNsense as a native VPN service with multiple client tunnels, native server instances, server peers, client provisioning, selective routing and managed service lifecycle.
+`opnsense-awg-plugin` integrates AmneziaWG into OPNsense as a native VPN service with multiple client tunnels, native server instances, server peers, client provisioning, selective routing, active data-plane health monitoring and managed service lifecycle.
 
 The plugin supports **AmneziaWG 3.1** while retaining compatibility with existing **AWG 2.x** configurations.
 
@@ -71,11 +71,14 @@ The original copyright notice and BSD 2-Clause License are retained in [LICENSE]
 - If a changed tunnel fails to restart, the lifecycle engine attempts to restore its previous working canonical config.
 - Lifecycle operations are serialized with `flock(2)`.
 - The watchdog repairs only the failed managed instance instead of restarting every tunnel.
+- Optional per-client active health probes verify the AWG data plane instead of treating an existing interface or sentinel PID as proof of connectivity.
+- Optional **Gateway Health Sync** mirrors verified client health into a native OPNsense gateway `Force Down` state, allowing Gateway Groups to fail over without `dpinger`.
+- Three consecutive failed probes assert `Force Down`; when the global Watchdog is enabled the affected client tunnel is also restarted with a 10-minute restart cooldown. The next successful probe clears `Force Down`.
 - A live `awgN` interface without the expected plugin-owned canonical config is treated as unmanaged and is not taken over blindly.
 
 ## Installer and package handling
 
-The v2.0.5 installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
+The v2.1.0 installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
 
 Current supported package releases:
 
@@ -177,6 +180,34 @@ Example:
 
 The public VPS address belongs in the AmneziaWG `Endpoint`; it is **not** the OPNsense policy-routing gateway address.
 
+### Active health monitoring and Gateway Health Sync
+
+Version 2.1.0 can monitor a client with a real ICMP probe sourced from the client's AWG tunnel address.
+
+In **VPN → AmneziaWG → Clients**, edit a client and use:
+
+| Field | Purpose |
+|---|---|
+| **Health Monitor** | Runs one active data-plane probe every minute. |
+| **Health Probe Target** | Optional IPv4 target inside the tunnel. Leave empty to use the native OPNsense gateway configured on the assigned `awgN` interface. |
+| **Gateway Health Sync** | Mirrors the debounced health result into the native gateway `Force Down` state. |
+
+The recommended target is the remote AWG tunnel/gateway address because a reply proves the local AWG interface, encrypted transport, remote AWG endpoint and return path are working. The target must answer ICMP.
+
+For **Gateway Health Sync**:
+
+1. assign and enable the `awgN` interface in OPNsense;
+2. configure one static IPv4 gateway on that assignment;
+3. enable **Health Monitor** and **Gateway Health Sync** on the AWG client;
+4. disable native **Gateway Monitoring** for that gateway so the plugin health result is the single source of truth;
+5. use the gateway directly or as a member of an OPNsense Gateway Group.
+
+The plugin adopts the existing gateway; it does not replace it. It records the gateway's original `Force Down` value and restores that value when synchronization is disabled, the client is deleted, or the plugin is removed.
+
+A first or second failed probe is treated as transient. On the third consecutive failure the synchronized gateway is forced down and OPNsense's normal routing alarm path rebuilds Gateway Groups/PF policy. The next successful probe clears `Force Down`. If the global **Watchdog** is enabled, the same three-failure threshold also restarts only the affected `awgN` client, with a 10-minute cooldown.
+
+Native `dpinger` remains available when Gateway Health Sync is not used; the two health sources should not control the same gateway at the same time.
+
 ### Outbound NAT for Internet breakout
 
 For the normal “send selected LAN/VLAN traffic to the Internet through the VPS” design, create an Outbound NAT rule on the assigned AWG interface:
@@ -241,7 +272,7 @@ This keeps the VPN service lifecycle separate from OPNsense security policy.
 
 ## Updating
 
-Run the `install.sh` from the new release directory as root. The v2.0.5 installer is also the migration path from v1.0.0/AWG2; do not manually replace the kernel module or userspace binaries first.
+Run the `install.sh` from the new release directory as root. The v2.1.0 installer is also the migration path from v1.0.0/AWG2; do not manually replace the kernel module or userspace binaries first.
 
 The installer resolves the latest supported AWG 3.x release from each package repository independently on every install/repair run. It downloads each package's matching `.pkg.sha256` asset, verifies hashes and manifests before mutation, and does not require the kmod and tools version strings to match. A kernel-only update therefore requires only a new kmod release, and a tools-only update requires only a new tools release.
 
@@ -313,6 +344,8 @@ plugin/
 │   └── views/OPNsense/AmneziaWG/
 ├── scripts/AmneziaWG/
 │   ├── amneziawg-service-control.php
+│   ├── amneziawg-health.php
+│   ├── amneziawg-gateway-sync.php
 │   ├── amneziawg-watchdog.php
 │   ├── amneziawg-ifstats.php
 └── service/
@@ -332,3 +365,4 @@ Additional projects used by or relevant to this plugin:
 - [AmneziaVPN](https://github.com/amnezia-vpn) / AmneziaWG
 - [OPNsense](https://opnsense.org/)
 - [FreeBSD ports/packages](https://www.freebsd.org/)
+- [nvk86/opnsense-xray-plugin](https://github.com/nvk86/opnsense-xray-plugin) — companion VLESS + REALITY client plugin for OPNsense; AWG and Xray gateways can be combined using ordinary OPNsense Gateway Groups.

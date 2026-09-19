@@ -1,10 +1,10 @@
 #!/bin/sh
-# opnsense-awg v2.2.0 installer
+# opnsense-awg v2.3.0 installer
 # Migrates the legacy FreeBSD amnezia-kmod/amnezia-tools AWG2 stack to the
 # project-owned AWG 3.1 packages, preserving OPNsense configuration and keys.
 set -eu
 
-PLUGIN_VERSION="2.2.0"
+PLUGIN_VERSION="2.3.0"
 KMOD_REPO="nvk86/opnsense-awg-kmod"
 TOOLS_REPO="nvk86/opnsense-awg-tools"
 KMOD_VERSION=""
@@ -289,6 +289,7 @@ run_migrations(){
 postflight(){
     service configd restart >/dev/null
     rm -f /var/lib/php/tmp/opnsense_menu_cache.xml
+    rm -f /var/lib/php/tmp/opnsense_acl_cache.json 2>/dev/null || true
     [ -x /usr/local/bin/awg ] || die "awg binary missing after install"
     [ -x /usr/local/bin/awg-quick ] || die "awg-quick binary missing after install"
     /sbin/kldstat -q -m if_awg >/dev/null 2>&1 || die "if_awg not loaded"
@@ -305,6 +306,7 @@ postflight(){
     /usr/local/bin/php -l /usr/local/opnsense/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php >/dev/null || die "Service API syntax check failed"
     grep -Fq 'public function metricsAction()' /usr/local/opnsense/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php || die "Prometheus metrics endpoint missing after install"
     grep -Fq '<acl_amneziawg_metrics>' /usr/local/opnsense/mvc/app/models/OPNsense/AmneziaWG/ACL/ACL.xml || die "Prometheus metrics ACL missing after install"
+    grep -Fq '<name>AmneziaWG: Prometheus metrics</name>' /usr/local/opnsense/mvc/app/models/OPNsense/AmneziaWG/ACL/ACL.xml || die "Prometheus metrics ACL name missing after install"
     grep -Rqs 'if_amn' /usr/local/opnsense/scripts/AmneziaWG /usr/local/etc/rc.syshook.d/start/50-amneziawg && die "Legacy if_amn reference remains in runtime scripts"
     # A healthy backend can legitimately report either "stopped" (no live
     # tunnels yet) or "ok".  At this point the installer intentionally stopped
@@ -400,6 +402,7 @@ rollback(){
         for _f in "$TXN_DIR"/packages/*.pkg; do [ -f "$_f" ] || continue; pkgq add "$_f" >/dev/null 2>&1 || warn "Could not restore package $_f"; done
     fi
     restore_rootfs
+    rm -f /var/lib/php/tmp/opnsense_acl_cache.json 2>/dev/null || true
     if [ "$OLD_IF_AMN" -eq 1 ]; then /sbin/kldload if_amn >/dev/null 2>&1 || warn "Could not reload legacy if_amn"; fi
     if [ "$OLD_IF_AWG" -eq 1 ]; then /sbin/kldload /boot/modules/if_awg.ko >/dev/null 2>&1 || warn "Could not reload previous if_awg"; fi
     if [ "$MIGRATION_TEST" -eq 0 ]; then
@@ -427,6 +430,7 @@ uninstall(){
     rm -f /var/run/amneziawg-health-*.json
     remove_plugin_files
     rm -f /var/lib/php/tmp/opnsense_menu_cache.xml
+    rm -f /var/lib/php/tmp/opnsense_acl_cache.json 2>/dev/null || true
     service configd restart >/dev/null 2>&1 || true
     log "opnsense-awg plugin removed. AWG packages and /usr/local/etc/amnezia were intentionally kept."
     exit 0

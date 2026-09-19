@@ -14,7 +14,8 @@ Feature release adding active client health monitoring and native OPNsense Gatew
 - On first adoption after moving a gateway away from `dpinger`, the plugin performs a one-time OPNsense Gateway Watcher cache reconciliation so stale monitor state cannot mask plugin-driven `Force Down` during Gateway Group/PF regeneration.
 - The global Watchdog can additionally restart only the unhealthy AWG client after the same three-failure threshold. Restart cooldown is 10 minutes.
 - Health monitoring and gateway synchronization continue to operate even when automatic Watchdog restart is disabled.
-- The General page now has an aggregate **Health** badge. It reports the worst monitored client state, including `offline 1/3` and `offline 2/3` during the debounce window; detailed per-client health remains in Diagnostics.
+- The General page has an aggregate **Health** badge showing the worst monitored client state, including `offline 1/3` and `offline 2/3` during the debounce window.
+- The Clients grid has a separate **Health** column whose value is calculated independently for each tunnel from that client's UUID health cache.
 - Diagnostics now includes active health, probe target, latency, consecutive failures, native gateway status, `Force Down`, and loaded PF `route-to` state.
 - Added an on-demand **Test Health** action.
 

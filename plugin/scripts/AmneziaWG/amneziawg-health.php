@@ -188,7 +188,8 @@ function awg_health_update(string $uuid, bool $online, string $status, string $m
 {
     $old = awg_health_read_cache($uuid);
     $now = time();
-    $failures = $status === 'stopped' ? 0 : ($online ? 0 : ((int)($old['consecutive_failures'] ?? 0) + 1));
+    $inconclusive = in_array($status, ['stopped', 'waiting'], true);
+    $failures = $inconclusive ? 0 : ($online ? 0 : ((int)($old['consecutive_failures'] ?? 0) + 1));
     $state = array_merge([
         'online' => $online,
         'status' => $status,
@@ -198,7 +199,7 @@ function awg_health_update(string $uuid, bool $online, string $status, string $m
         'checked_at_iso' => date('c', $now),
         'consecutive_failures' => $failures,
         'last_ok' => $online ? $now : ($old['last_ok'] ?? null),
-        'last_failure' => (!$online && $status !== 'stopped') ? $now : ($old['last_failure'] ?? null),
+        'last_failure' => (!$online && !$inconclusive) ? $now : ($old['last_failure'] ?? null),
         'last_restart' => $old['last_restart'] ?? null,
     ], $extra);
     awg_health_write_cache($uuid, $state);
@@ -292,16 +293,23 @@ if ($target === '') {
 }
 
 $routeInterface = awg_health_route_interface($target);
-// A custom target can otherwise accidentally follow the firewall's normal
-// host routing table instead of the AWG tunnel. The native gateway itself is
-// exempt because OPNsense may represent a Far Gateway without a conventional
-// host route while still sending gateway probes on the assigned interface.
-if ($preferred !== '' && $target !== (string)$gateway['address']
-    && $routeInterface !== '' && $routeInterface !== $iface) {
-    $state = awg_health_update($uuid, false, 'offline',
-        'Health Probe Target routes via ' . $routeInterface . ', not ' . $iface, null,
-        ['interface' => $iface, 'source' => $source, 'target' => $target, 'route_interface' => $routeInterface]);
-    awg_health_output(['result' => 'failed'] + $state, 0);
+// During interface/routing reconciliation the native gateway route can be
+// temporarily absent or still point at the previous default route. That is a
+// routing-readiness condition, not proof that the AWG data plane failed.
+// Never count it toward the 3-failure debounce.
+if ($routeInterface === '' || $routeInterface !== $iface) {
+    $message = $routeInterface === ''
+        ? 'Route to health target is not ready on ' . $iface
+        : 'Route to health target currently uses ' . $routeInterface . ', waiting for ' . $iface;
+    $state = awg_health_update($uuid, false, 'waiting', $message, null, [
+        'interface' => $iface,
+        'source' => $source,
+        'target' => $target,
+        'native_gateway' => (string)$gateway['name'],
+        'native_gateway_address' => (string)$gateway['address'],
+        'route_interface' => $routeInterface,
+    ]);
+    awg_health_output(['result' => 'waiting'] + $state, 0);
 }
 
 $start = microtime(true);

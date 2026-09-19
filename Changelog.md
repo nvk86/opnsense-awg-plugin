@@ -8,6 +8,7 @@
 - Existing gateways remain user-owned. The plugin records and restores their original `Force Down` value when synchronization is released; it never creates or deletes AWG gateways.
 - Native gateway monitoring must be disabled while Gateway Health Sync is active so plugin health is the single gateway-health source.
 - Extended the watchdog to restart only the unhealthy client after the same three-failure threshold, with a 10-minute restart cooldown. Active health and gateway synchronization continue to work when automatic restart is disabled.
+- After a watchdog restart, the invalidated pre-restart health cache is rebuilt as `waiting` with `last_restart` preserved, so the 10-minute cooldown survives the lifecycle reset and the UI waits for a fresh probe instead of showing stale failures.
 - Added an aggregate **Health** badge to the General page. It shows the worst monitored client state (`online`, `offline 1/3`, `offline 2/3`, `offline`, `waiting`, `stale`, or `stopped`).
 - Added a **Health** column to the Clients grid. Every row is derived only from that client's own UUID health cache, so tunnel health is never copied from the aggregate General status.
 - Added on-demand **Test Health** and health/native-gateway/PF status to Diagnostics.

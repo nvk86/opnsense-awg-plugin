@@ -208,7 +208,9 @@ A first or second failed probe is treated as transient. On the third consecutive
 
 Native `dpinger` remains available when Gateway Health Sync is not used; the two health sources should not control the same gateway at the same time.
 
-The **General** page shows one aggregate health badge for monitored clients. It reports the worst current state, including the debounce stages `offline 1/3` and `offline 2/3`. Per-client health details, latency, target, failures, gateway state and PF status remain in **Diagnostics**.
+The **General** page shows one aggregate health badge for monitored clients. It reports the worst current state, including the debounce stages `offline 1/3` and `offline 2/3`.
+
+The **Clients** page also shows a per-client **Health** column. Each row is read only from that tunnel's UUID-specific health cache, so one failed client does not change another client's row. Detailed latency, target, failures, gateway state and PF status remain in **Diagnostics**.
 
 When an existing gateway is moved from `dpinger` to plugin health, 2.1.0 performs a one-time Gateway Watcher reconciliation. This clears any cached pre-disable `dpinger` state that could otherwise mask a newly asserted `Force Down` during PF/Gateway Group regeneration. The reconciliation is recorded per adopted gateway and is not repeated on every health check.
 

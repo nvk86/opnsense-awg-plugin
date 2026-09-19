@@ -93,5 +93,7 @@ jobs:
           grep -Fq 'public function metricsAction()' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php
           grep -Fq 'text/plain; version=0.0.4' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php
           grep -Fq '<acl_amneziawg_metrics>' plugin/mvc/app/models/OPNsense/AmneziaWG/ACL/ACL.xml
+          grep -Fq '<name>AmneziaWG: Prometheus metrics</name>' plugin/mvc/app/models/OPNsense/AmneziaWG/ACL/ACL.xml
+          grep -Fq 'opnsense_acl_cache.json' install.sh
           grep -Fq '<pattern>api/amneziawg/service/metrics</pattern>' plugin/mvc/app/models/OPNsense/AmneziaWG/ACL/ACL.xml
           grep -Fq 'scrape never starts a health probe' README.md

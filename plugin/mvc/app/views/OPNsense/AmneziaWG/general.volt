@@ -843,8 +843,17 @@
                 dataType: 'json',
                 timeout: 10000,
                 success: function (data) {
-                    if (!data || (data.result !== 'ok' && data.result !== 'failed')) {
-                        alert((data && data.message) || "{{ lang._('Health probe failed') }}");
+                    if (!data) {
+                        alert("{{ lang._('Health probe failed') }}");
+                    } else if (data.result === 'failed') {
+                        BootstrapDialog.show({
+                            type: BootstrapDialog.TYPE_WARNING,
+                            title: "{{ lang._('Health probe') }}",
+                            message: $('<div>').text(data.message || "{{ lang._('Health probe failed') }}").html(),
+                            buttons: [{label: "{{ lang._('Close') }}", action: function(d){ d.close(); }}]
+                        });
+                    } else if (data.result !== 'ok') {
+                        alert(data.message || "{{ lang._('Health probe failed') }}");
                     }
                     loadDiagnostics();
                 },

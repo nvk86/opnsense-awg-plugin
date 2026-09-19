@@ -115,7 +115,8 @@ class InstanceController extends ApiMutableModelControllerBase
             $this->validateAwg31Ranges($body, 'instance'),
             $this->validateKeepaliveRange($body['peer_persistent_keepalive'] ?? '', 'instance.peer_persistent_keepalive'),
             $this->validateInterfaceNumber($body, null),
-            $this->validateListenPort($body, null)
+            $this->validateListenPort($body, null),
+            $this->validateHealthSettings($body)
         );
         if (!empty($validations)) {
             return ['result' => 'failed', 'validations' => $validations];
@@ -162,7 +163,8 @@ class InstanceController extends ApiMutableModelControllerBase
             $this->validateAwg31Ranges($body, 'instance'),
             $this->validateKeepaliveRange($body['peer_persistent_keepalive'] ?? '', 'instance.peer_persistent_keepalive'),
             $this->validateInterfaceNumber($body, (string)$uuid),
-            $this->validateListenPort($body, (string)$uuid)
+            $this->validateListenPort($body, (string)$uuid),
+            $this->validateHealthSettings($body)
         );
         if (!empty($validations)) {
             return ['result' => 'failed', 'validations' => $validations];
@@ -207,8 +209,16 @@ class InstanceController extends ApiMutableModelControllerBase
     {
         $result = $this->delBase('instance', $uuid);
         if (($result['result'] ?? '') === 'deleted') {
+            // Release Force Down ownership immediately so a deleted client
+            // never leaves a native gateway under plugin control.
+            try {
+                (new Backend())->configdRun('amneziawg gateway_sync release ' . (string)$uuid);
+            } catch (\Throwable $e) {
+                // The periodic reconciler is the fallback if configd is unavailable.
+            }
             // SEC-1: remove the orphaned key file together with the instance
             @unlink($this->keyFilePath((string)$uuid));
+            @unlink('/var/run/amneziawg-health-' . preg_replace('/[^a-fA-F0-9\-]/', '', (string)$uuid) . '.json');
         }
         return $result;
     }
@@ -295,6 +305,24 @@ class InstanceController extends ApiMutableModelControllerBase
             ]];
         }
         return ['key' => $submitted];
+    }
+
+    /**
+     * Validate the optional active health monitor and native gateway sync.
+     */
+    private function validateHealthSettings(array $body): array
+    {
+        $errors = [];
+        $target = trim((string)($body['health_target'] ?? ''));
+        if ($target !== '' && filter_var($target, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            $errors['instance.health_target'] = 'Health Probe Target must be an IPv4 address';
+        }
+        $monitor = (string)($body['health_monitor'] ?? '0') === '1';
+        $sync = (string)($body['gateway_health_sync'] ?? '0') === '1';
+        if ($sync && !$monitor) {
+            $errors['instance.gateway_health_sync'] = 'Enable Health Monitor before Gateway Health Sync';
+        }
+        return $errors;
     }
 
     /**

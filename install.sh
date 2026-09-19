@@ -330,6 +330,7 @@ postflight(){
     if [ -n "$RUNNING_IFACES" ]; then
         _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
         printf '%s\n' "$_st" | grep -q '"status":"ok"' || die "restored tunnel status check failed: $_st"
+        [ ! -e /var/run/amneziawg_stopped.flag ] || die "stale service-level stopped flag remained after runtime restore"
     fi
 
     # Reconcile any existing 2.1.x ownership registry after files/configd are

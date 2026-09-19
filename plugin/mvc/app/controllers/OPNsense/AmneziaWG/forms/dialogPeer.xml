@@ -1,14 +1,14 @@
 <form>
- <field><id>peer.enabled</id><label>Enabled</label><type>checkbox</type><grid_view><type>boolean</type><formatter>rowtoggle</formatter></grid_view></field>
- <field><id>peer.name</id><label>Name</label><type>text</type></field>
+ <field><id>peer.enabled</id><label>Enabled</label><type>checkbox</type><help>Include this peer in the selected server configuration. Disabled peers are omitted from the live server instance after Apply.</help><grid_view><type>boolean</type><formatter>rowtoggle</formatter></grid_view></field>
+ <field><id>peer.name</id><label>Name</label><type>text</type><help>Descriptive client name used in the OPNsense UI and generated client configuration filename.</help></field>
  <field><id>peer.runtime</id><label>Status</label><type>ignore</type><grid_view><formatter>peerstatus</formatter><sortable>false</sortable><width>90</width></grid_view></field>
  <field><id>peer.server_name</id><label>Server</label><type>ignore</type><grid_view><sortable>false</sortable></grid_view></field>
  <field><id>peer.server</id><label>Server</label><type>text</type><help>Select the AmneziaWG server this peer belongs to.</help><grid_view><ignore>true</ignore></grid_view></field>
  <field><id>peer.allowed_ips</id><label>Allowed IPs</label><type>text</type><help>Client tunnel address/routes owned by this peer, normally e.g. 10.8.1.2/32</help></field>
  <field><id>peer.runtime_endpoint</id><label>Endpoint</label><type>ignore</type><grid_view><sortable>false</sortable></grid_view></field>
  <field><id>peer.latest_handshake</id><label>Latest Handshake</label><type>ignore</type><grid_view><formatter>peerhandshake</formatter><sortable>false</sortable><width>130</width></grid_view></field>
- <field><id>peer.public_key</id><label>Client Public Key</label><type>text</type><grid_view><ignore>true</ignore></grid_view></field>
- <field><id>peer.preshared_key</id><label>Pre-Shared Key</label><type>text</type><grid_view><ignore>true</ignore></grid_view></field>
+ <field><id>peer.public_key</id><label>Client Public Key</label><type>text</type><help>AmneziaWG public key of this client. Use Generate Client Keys for a new client, or paste the public key of an existing client.</help><grid_view><ignore>true</ignore></grid_view></field>
+ <field><id>peer.preshared_key</id><label>Pre-Shared Key</label><type>text</type><help>Optional symmetric pre-shared key. If configured, the exact same key must be present on the client.</help><grid_view><ignore>true</ignore></grid_view></field>
  <field><id>peer.persistent_keepalive</id><label>Persistent Keepalive</label><type>text</type><help>Optional per-peer PersistentKeepalive. Accepts 0-65535 or an AWG 3.1 range such as 20-30. Usually blank on a server unless periodic traffic to this peer is explicitly required.</help><grid_view><ignore>true</ignore></grid_view></field>
- <field><id>peer.description</id><label>Description</label><type>text</type></field>
+ <field><id>peer.description</id><label>Description</label><type>text</type><help>Optional note for this peer. It is shown only in the OPNsense UI and is not sent over the tunnel.</help></field>
 </form>

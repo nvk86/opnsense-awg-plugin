@@ -90,3 +90,8 @@ jobs:
           grep -Fq "Tunnel restarted by watchdog; waiting for health recheck" plugin/scripts/AmneziaWG/amneziawg-watchdog.php
           grep -Fq "wdg_mark_restart(\$row['uuid'], \$decoded)" plugin/scripts/AmneziaWG/amneziawg-watchdog.php
           grep -Fq 'Force Down' README.md
+          grep -Fq 'public function metricsAction()' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php
+          grep -Fq 'text/plain; version=0.0.4' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php
+          grep -Fq '<acl_amneziawg_metrics>' plugin/mvc/app/models/OPNsense/AmneziaWG/ACL/ACL.xml
+          grep -Fq '<pattern>api/amneziawg/service/metrics</pattern>' plugin/mvc/app/models/OPNsense/AmneziaWG/ACL/ACL.xml
+          grep -Fq 'scrape never starts a health probe' README.md

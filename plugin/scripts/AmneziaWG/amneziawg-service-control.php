@@ -70,6 +70,36 @@ function awg_clear_instance_stopped_flags(): void
     }
 }
 
+function awg_health_cache_invalidate_iface(string $iface): void
+{
+    if (!preg_match('/^awg\d{1,2}$/D', $iface)) {
+        return;
+    }
+    foreach (awg_get_instances() as $inst) {
+        if (($inst['mode'] ?? 'client') === 'server' || ($inst['interface'] ?? '') !== $iface) {
+            continue;
+        }
+        $uuid = (string)($inst['uuid'] ?? '');
+        if (preg_match('/^[0-9a-fA-F-]{36}$/D', $uuid)) {
+            @unlink('/var/run/amneziawg-health-' . $uuid . '.json');
+        }
+        return;
+    }
+}
+
+function awg_health_cache_invalidate_clients(): void
+{
+    foreach (awg_get_instances() as $inst) {
+        if (($inst['mode'] ?? 'client') === 'server') {
+            continue;
+        }
+        $uuid = (string)($inst['uuid'] ?? '');
+        if (preg_match('/^[0-9a-fA-F-]{36}$/D', $uuid)) {
+            @unlink('/var/run/amneziawg-health-' . $uuid . '.json');
+        }
+    }
+}
+
 function awg_get_instances(): array
 {
     $config = OPNsense\Core\Config::getInstance()->object();
@@ -1217,6 +1247,7 @@ switch ($action) {
         }
         awg_clear_instance_stopped_flags();
         if (awg_start_all()) {
+            awg_health_cache_invalidate_clients();
             echo "OK\n";
         } else {
             echo "ERROR: one or more enabled tunnels failed to start\n";
@@ -1260,6 +1291,7 @@ switch ($action) {
             break;
         }
         if (awg_start_all()) {
+            awg_health_cache_invalidate_clients();
             echo "OK\n";
         } else {
             echo "ERROR: one or more enabled tunnels failed to restart\n";
@@ -1379,6 +1411,7 @@ switch ($action) {
         } else {
             awg_stop_sentinel();
         }
+        awg_health_cache_invalidate_iface($ifaceArg);
         echo "OK\n";
         break;
 

@@ -47,7 +47,10 @@ jobs:
           grep -Fq 'amneziawg gateway_sync_release' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/InstanceController.php
           grep -Fq "pluginctl -c monitor" plugin/scripts/AmneziaWG/amneziawg-gateway-sync.php
           grep -Fq "watcher_reconciled" plugin/scripts/AmneziaWG/amneziawg-gateway-sync.php
-          ! grep -Fq '<id>instance.health_runtime</id>' plugin/mvc/app/controllers/OPNsense/AmneziaWG/forms/dialogInstance.xml
+          grep -Fq '<id>instance.health_runtime</id>' plugin/mvc/app/controllers/OPNsense/AmneziaWG/forms/dialogInstance.xml
+          grep -Fq "'healthstatus'" plugin/mvc/app/views/OPNsense/AmneziaWG/general.volt
+          grep -Fq "Per-client health only" plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/InstanceController.php
+          grep -Fq "health_monitor']" plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/InstanceController.php
           grep -Fq 'id="badge_health"' plugin/mvc/app/views/OPNsense/AmneziaWG/general.volt
           grep -Fq 'healthSummary' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php
           grep -Fq "Route to health target currently uses" plugin/scripts/AmneziaWG/amneziawg-health.php

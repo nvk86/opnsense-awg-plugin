@@ -208,6 +208,8 @@ A first or second failed probe is treated as transient. On the third consecutive
 
 Native `dpinger` remains available when Gateway Health Sync is not used; the two health sources should not control the same gateway at the same time.
 
+When an existing gateway is moved from `dpinger` to plugin health, 2.1.0 performs a one-time Gateway Watcher reconciliation. This clears any cached pre-disable `dpinger` state that could otherwise mask a newly asserted `Force Down` during PF/Gateway Group regeneration. The reconciliation is recorded per adopted gateway and is not repeated on every health check.
+
 ### Outbound NAT for Internet breakout
 
 For the normal “send selected LAN/VLAN traffic to the Internet through the VPS” design, create an Outbound NAT rule on the assigned AWG interface:

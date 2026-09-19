@@ -1364,7 +1364,11 @@ switch ($action) {
                 echo "ERROR: no enabled instance for " . $ifaceArg . "\n";
                 break;
             }
-            // Manual per-row start/restart lifts the per-instance stop.
+            // Manual per-row start/restart lifts both the per-instance
+            // stop and a stale service-level stop. This is required after
+            // transactional installer restore, which stops the whole service
+            // before bringing back the interfaces that were previously live.
+            @unlink(AWG_STOPPED_FLAG);
             @unlink(awg_instance_stopped_flag($ifaceArg));
             $probe = [];
             exec('/sbin/ifconfig ' . escapeshellarg($ifaceArg) . ' >/dev/null 2>&1', $probe, $probeRc);

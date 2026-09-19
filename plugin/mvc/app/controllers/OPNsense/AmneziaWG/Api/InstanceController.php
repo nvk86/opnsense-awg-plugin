@@ -73,12 +73,16 @@ class InstanceController extends ApiMutableModelControllerBase
                     ? json_decode((string)@file_get_contents($healthPath), true)
                     : null;
 
-                if (!is_array($health) || (int)($health['checked_at'] ?? 0) <= 0) {
+                if ($row['runtime'] === 'stopped') {
+                    $row['health_runtime'] = 'stopped';
+                } elseif (!is_array($health) || (int)($health['checked_at'] ?? 0) <= 0) {
+                    $row['health_runtime'] = 'waiting';
+                } elseif (($health['status'] ?? '') === 'stopped') {
+                    // A running interface with a cached stopped state means
+                    // lifecycle changed since the last active probe.
                     $row['health_runtime'] = 'waiting';
                 } elseif ((time() - (int)$health['checked_at']) > 150) {
                     $row['health_runtime'] = 'stale';
-                } elseif (($health['status'] ?? '') === 'stopped') {
-                    $row['health_runtime'] = 'stopped';
                 } elseif (!empty($health['online'])) {
                     $row['health_runtime'] = 'online';
                 } else {

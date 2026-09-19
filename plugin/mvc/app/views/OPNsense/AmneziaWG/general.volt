@@ -159,8 +159,6 @@
                                     return '<span class="label label-default">?</span>';
                             }
                         }
-
-                        }
                     }
                 }
             }

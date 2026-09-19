@@ -212,7 +212,7 @@ class InstanceController extends ApiMutableModelControllerBase
             // Release Force Down ownership immediately so a deleted client
             // never leaves a native gateway under plugin control.
             try {
-                (new Backend())->configdRun('amneziawg gateway_sync release ' . (string)$uuid);
+                (new Backend())->configdRun('amneziawg gateway_sync_release ' . (string)$uuid);
             } catch (\Throwable $e) {
                 // The periodic reconciler is the fallback if configd is unavailable.
             }

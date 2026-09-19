@@ -23,6 +23,17 @@
         </grid_view>
     </field>
     <field>
+        <!-- Grid-only per-client active health state from this instance UUID. -->
+        <id>instance.health_runtime</id>
+        <label>Health</label>
+        <type>ignore</type>
+        <grid_view>
+            <formatter>healthstatus</formatter>
+            <sortable>false</sortable>
+            <width>120</width>
+        </grid_view>
+    </field>
+    <field>
         <id>instance.name</id>
         <label>Name</label>
         <type>text</type>

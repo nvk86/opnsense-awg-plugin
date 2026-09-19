@@ -10,6 +10,7 @@
 - Extended the watchdog to restart only the unhealthy client after the same three-failure threshold, with a 10-minute restart cooldown. Active health and gateway synchronization continue to work when automatic restart is disabled.
 - Added on-demand **Test Health** and health/native-gateway/PF status to Diagnostics.
 - Added cleanup/reconciliation on client deletion and plugin uninstall.
+- Added one-time OPNsense Gateway Watcher cache reconciliation when adopting a gateway after native `dpinger` monitoring is disabled, preventing stale monitor state from masking plugin-driven `Force Down`.
 - Documented Gateway Group integration and the companion `opnsense-xray-plugin` project.
 
 

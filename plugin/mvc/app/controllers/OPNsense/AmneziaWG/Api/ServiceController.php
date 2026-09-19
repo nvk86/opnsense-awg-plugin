@@ -391,6 +391,284 @@ class ServiceController extends ApiMutableServiceControllerBase
     }
 
     /**
+     * Escape a Prometheus label value without exposing any configuration
+     * material other than the explicitly selected labels.
+     */
+    private function prometheusEscapeLabel(string $value): string
+    {
+        return str_replace(
+            ["\\", "\n", "\""],
+            ["\\\\", "\\n", "\\\""],
+            $value
+        );
+    }
+
+    private function prometheusLabels(array $labels): string
+    {
+        if (empty($labels)) {
+            return '';
+        }
+        $parts = [];
+        foreach ($labels as $key => $value) {
+            $parts[] = $key . '="' . $this->prometheusEscapeLabel((string)$value) . '"';
+        }
+        return '{' . implode(',', $parts) . '}';
+    }
+
+    private function prometheusSample(string $name, $value, array $labels = []): string
+    {
+        if (is_float($value)) {
+            $number = rtrim(rtrim(sprintf('%.6F', $value), '0'), '.');
+            if ($number === '') {
+                $number = '0';
+            }
+        } else {
+            $number = (string)(int)$value;
+        }
+        return $name . $this->prometheusLabels($labels) . ' ' . $number;
+    }
+
+    private function prometheusHealthState(
+        array $health,
+        bool $probeEnabled,
+        bool $runtimeEnabled,
+        bool $manualStopped
+    ): string {
+        if (!$probeEnabled) {
+            return 'disabled';
+        }
+        if (!$runtimeEnabled || $manualStopped || (string)($health['status'] ?? '') === 'stopped') {
+            return 'stopped';
+        }
+
+        $checkedAt = (int)($health['checked_at'] ?? 0);
+        if ($checkedAt <= 0 || (string)($health['status'] ?? '') === 'waiting') {
+            return 'waiting';
+        }
+        if ((time() - $checkedAt) > 150) {
+            return 'stale';
+        }
+        return !empty($health['online']) ? 'online' : 'offline';
+    }
+
+    /**
+     * GET /api/amneziawg/service/metrics
+     *
+     * Prometheus text exposition built only from current runtime status and
+     * the existing one-minute health cache. Scraping this endpoint never runs
+     * an active health probe and never changes tunnel or gateway state.
+     */
+    public function metricsAction()
+    {
+        if (!$this->request->isGet()) {
+            $this->response->setStatusCode(405, 'Method Not Allowed');
+            $this->response->setHeader('Allow', 'GET');
+            return "GET required\n";
+        }
+
+        $this->response->setHeader(
+            'Content-Type',
+            'text/plain; version=0.0.4; charset=utf-8'
+        );
+        $this->response->setHeader('Cache-Control', 'no-store');
+
+        $config = \OPNsense\Core\Config::getInstance()->object();
+        $general = $config->OPNsense->amneziawg->general ?? null;
+        $serviceEnabled = (string)($general->enabled ?? '0') === '1';
+        $watchdogEnabled = (string)($general->watchdog ?? '0') === '1';
+        $serviceStopped = is_file('/var/run/amneziawg_stopped.flag');
+
+        $runtimeRaw = trim((string)(new Backend())->configdRun('amneziawg status'));
+        $runtime = json_decode($runtimeRaw, true);
+        $runtimeInventoryOk = is_array($runtime);
+        $runtimeByInterface = [];
+        if ($runtimeInventoryOk) {
+            foreach (($runtime['tunnels'] ?? []) as $tunnel) {
+                if (!is_array($tunnel)) {
+                    continue;
+                }
+                $iface = trim((string)($tunnel['interface'] ?? ''));
+                if ($iface !== '') {
+                    $runtimeByInterface[$iface] = $tunnel;
+                }
+            }
+        }
+
+        $pluginVersion = trim((string)@file_get_contents(
+            '/usr/local/opnsense/mvc/app/models/OPNsense/AmneziaWG/version.txt'
+        ));
+        if ($pluginVersion === '') {
+            $pluginVersion = 'unknown';
+        }
+
+        $lines = [
+            '# HELP opnsense_awg_plugin_info Plugin build information.',
+            '# TYPE opnsense_awg_plugin_info gauge',
+            $this->prometheusSample(
+                'opnsense_awg_plugin_info',
+                1,
+                ['version' => $pluginVersion]
+            ),
+            '# HELP opnsense_awg_runtime_inventory_ok Whether the runtime inventory could be read successfully.',
+            '# TYPE opnsense_awg_runtime_inventory_ok gauge',
+            $this->prometheusSample('opnsense_awg_runtime_inventory_ok', $runtimeInventoryOk ? 1 : 0),
+            '# HELP opnsense_awg_service_enabled Whether AmneziaWG is enabled in configuration.',
+            '# TYPE opnsense_awg_service_enabled gauge',
+            $this->prometheusSample('opnsense_awg_service_enabled', $serviceEnabled ? 1 : 0),
+            '# HELP opnsense_awg_service_manually_stopped Whether the whole service was manually stopped.',
+            '# TYPE opnsense_awg_service_manually_stopped gauge',
+            $this->prometheusSample('opnsense_awg_service_manually_stopped', $serviceStopped ? 1 : 0),
+            '# HELP opnsense_awg_watchdog_enabled Whether automatic runtime recovery is enabled.',
+            '# TYPE opnsense_awg_watchdog_enabled gauge',
+            $this->prometheusSample('opnsense_awg_watchdog_enabled', $watchdogEnabled ? 1 : 0),
+            '# HELP opnsense_awg_client_enabled Whether the client is enabled in configuration.',
+            '# TYPE opnsense_awg_client_enabled gauge',
+            '# HELP opnsense_awg_client_up Whether the client AWG interface is currently up.',
+            '# TYPE opnsense_awg_client_up gauge',
+            '# HELP opnsense_awg_client_manual_stopped Whether the client was manually stopped.',
+            '# TYPE opnsense_awg_client_manual_stopped gauge',
+            '# HELP opnsense_awg_health_probe_enabled Whether scheduled active health probing is enabled for the client.',
+            '# TYPE opnsense_awg_health_probe_enabled gauge',
+            '# HELP opnsense_awg_gateway_health_sync_enabled Whether native gateway health synchronization is enabled.',
+            '# TYPE opnsense_awg_gateway_health_sync_enabled gauge',
+            '# HELP opnsense_awg_health_online Whether the cached client health is fresh and online.',
+            '# TYPE opnsense_awg_health_online gauge',
+            '# HELP opnsense_awg_health_state Current cached health state represented by a single labeled sample.',
+            '# TYPE opnsense_awg_health_state gauge',
+            '# HELP opnsense_awg_health_latency_seconds Last successful or failed probe latency in seconds.',
+            '# TYPE opnsense_awg_health_latency_seconds gauge',
+            '# HELP opnsense_awg_health_consecutive_failures Consecutive active health probe failures.',
+            '# TYPE opnsense_awg_health_consecutive_failures gauge',
+            '# HELP opnsense_awg_health_last_check_timestamp_seconds Unix timestamp of the last health check.',
+            '# TYPE opnsense_awg_health_last_check_timestamp_seconds gauge',
+            '# HELP opnsense_awg_health_last_ok_timestamp_seconds Unix timestamp of the last successful health check.',
+            '# TYPE opnsense_awg_health_last_ok_timestamp_seconds gauge',
+            '# HELP opnsense_awg_health_last_failure_timestamp_seconds Unix timestamp of the last failed health check.',
+            '# TYPE opnsense_awg_health_last_failure_timestamp_seconds gauge',
+            '# HELP opnsense_awg_health_last_restart_timestamp_seconds Unix timestamp of the last watchdog restart.',
+            '# TYPE opnsense_awg_health_last_restart_timestamp_seconds gauge',
+            '# HELP opnsense_awg_health_age_seconds Age of the cached health result in seconds.',
+            '# TYPE opnsense_awg_health_age_seconds gauge',
+            '# HELP opnsense_awg_client_latest_handshake_timestamp_seconds Latest AWG peer handshake timestamp for the client tunnel.',
+            '# TYPE opnsense_awg_client_latest_handshake_timestamp_seconds gauge',
+            '# HELP opnsense_awg_server_enabled Whether the server is enabled in configuration.',
+            '# TYPE opnsense_awg_server_enabled gauge',
+            '# HELP opnsense_awg_server_up Whether the server AWG interface is currently up.',
+            '# TYPE opnsense_awg_server_up gauge',
+            '# HELP opnsense_awg_server_latest_handshake_timestamp_seconds Latest peer handshake timestamp seen on the server tunnel.',
+            '# TYPE opnsense_awg_server_latest_handshake_timestamp_seconds gauge',
+        ];
+
+        foreach (($config->OPNsense->amneziawg->instances->instance ?? []) as $inst) {
+            $uuid = (string)$inst['uuid'];
+            if (!preg_match('/^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$/D', $uuid)) {
+                continue;
+            }
+
+            $ifnum = trim((string)($inst->interface_number ?? ''));
+            $iface = 'awg' . ($ifnum === '' ? '0' : (string)(int)$ifnum);
+            $name = trim((string)($inst->name ?? ''));
+            if ($name === '') {
+                $name = $iface;
+            }
+            $labels = ['name' => $name, 'interface' => $iface];
+
+            $enabled = (string)($inst->enabled ?? '0') === '1';
+            $healthMonitor = (string)($inst->health_monitor ?? '0') === '1';
+            $gatewaySync = (string)($inst->gateway_health_sync ?? '0') === '1';
+            $probeEnabled = $healthMonitor || $gatewaySync;
+            $manualStopped = is_file('/var/run/amneziawg_stopped_' . $iface . '.flag');
+            $runtimeEnabled = $serviceEnabled && $enabled && !$serviceStopped;
+
+            $tunnel = $runtimeByInterface[$iface] ?? [];
+            $up = !empty($tunnel['up']);
+            $latestHandshake = (int)($tunnel['latest_handshake'] ?? 0);
+
+            $healthPath = '/var/run/amneziawg-health-' . $uuid . '.json';
+            $health = is_file($healthPath)
+                ? json_decode((string)@file_get_contents($healthPath), true)
+                : [];
+            if (!is_array($health)) {
+                $health = [];
+            }
+
+            $state = $this->prometheusHealthState(
+                $health,
+                $probeEnabled,
+                $runtimeEnabled,
+                $manualStopped
+            );
+            $checkedAt = (int)($health['checked_at'] ?? 0);
+            $healthAge = $checkedAt > 0 ? max(0, time() - $checkedAt) : 0;
+
+            $lines[] = $this->prometheusSample('opnsense_awg_client_enabled', $enabled ? 1 : 0, $labels);
+            $lines[] = $this->prometheusSample('opnsense_awg_client_up', $up ? 1 : 0, $labels);
+            $lines[] = $this->prometheusSample('opnsense_awg_client_manual_stopped', $manualStopped ? 1 : 0, $labels);
+            $lines[] = $this->prometheusSample('opnsense_awg_health_probe_enabled', $probeEnabled ? 1 : 0, $labels);
+            $lines[] = $this->prometheusSample('opnsense_awg_gateway_health_sync_enabled', $gatewaySync ? 1 : 0, $labels);
+            $lines[] = $this->prometheusSample('opnsense_awg_health_online', $state === 'online' ? 1 : 0, $labels);
+            $lines[] = $this->prometheusSample('opnsense_awg_health_state', 1, $labels + ['state' => $state]);
+            if (isset($health['latency_ms']) && is_numeric($health['latency_ms'])) {
+                $lines[] = $this->prometheusSample(
+                    'opnsense_awg_health_latency_seconds',
+                    ((float)$health['latency_ms']) / 1000,
+                    $labels
+                );
+            }
+            $lines[] = $this->prometheusSample(
+                'opnsense_awg_health_consecutive_failures',
+                (int)($health['consecutive_failures'] ?? 0),
+                $labels
+            );
+            $lines[] = $this->prometheusSample('opnsense_awg_health_last_check_timestamp_seconds', $checkedAt, $labels);
+            $lines[] = $this->prometheusSample(
+                'opnsense_awg_health_last_ok_timestamp_seconds',
+                (int)($health['last_ok'] ?? 0),
+                $labels
+            );
+            $lines[] = $this->prometheusSample(
+                'opnsense_awg_health_last_failure_timestamp_seconds',
+                (int)($health['last_failure'] ?? 0),
+                $labels
+            );
+            $lines[] = $this->prometheusSample(
+                'opnsense_awg_health_last_restart_timestamp_seconds',
+                (int)($health['last_restart'] ?? 0),
+                $labels
+            );
+            $lines[] = $this->prometheusSample('opnsense_awg_health_age_seconds', $healthAge, $labels);
+            $lines[] = $this->prometheusSample(
+                'opnsense_awg_client_latest_handshake_timestamp_seconds',
+                $latestHandshake,
+                $labels
+            );
+        }
+
+        foreach (($config->OPNsense->amneziawg->servers->server ?? []) as $server) {
+            $ifnum = trim((string)($server->interface_number ?? ''));
+            $iface = 'awg' . ($ifnum === '' ? '0' : (string)(int)$ifnum);
+            $name = trim((string)($server->name ?? ''));
+            if ($name === '') {
+                $name = $iface;
+            }
+            $labels = ['name' => $name, 'interface' => $iface];
+            $enabled = (string)($server->enabled ?? '0') === '1';
+            $tunnel = $runtimeByInterface[$iface] ?? [];
+
+            $lines[] = $this->prometheusSample('opnsense_awg_server_enabled', $enabled ? 1 : 0, $labels);
+            $lines[] = $this->prometheusSample('opnsense_awg_server_up', !empty($tunnel['up']) ? 1 : 0, $labels);
+            $lines[] = $this->prometheusSample(
+                'opnsense_awg_server_latest_handshake_timestamp_seconds',
+                (int)($tunnel['latest_handshake'] ?? 0),
+                $labels
+            );
+        }
+
+        return implode("\n", $lines) . "\n";
+    }
+
+
+    /**
      * POST /api/amneziawg/service/log
      * Returns last 150 lines of amneziawg.log (POST-only: log may contain IPs)
      */

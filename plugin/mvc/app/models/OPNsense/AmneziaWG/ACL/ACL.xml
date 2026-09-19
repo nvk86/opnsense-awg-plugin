@@ -1,45 +1,52 @@
 <?xml version="1.0"?>
 <acl>
     <acl_amneziawg_general>
-        <n>AmneziaWG: General settings</n>
+        <name>AmneziaWG: General settings</name>
         <description>Allow access to AmneziaWG general configuration</description>
         <patterns>
             <pattern>api/amneziawg/general/*</pattern>
         </patterns>
     </acl_amneziawg_general>
     <acl_amneziawg_instance>
-        <n>AmneziaWG: Instance settings</n>
+        <name>AmneziaWG: Instance settings</name>
         <description>Allow access to AmneziaWG tunnel instance configuration</description>
         <patterns>
             <pattern>api/amneziawg/instance/*</pattern>
         </patterns>
     </acl_amneziawg_instance>
     <acl_amneziawg_server>
-        <n>AmneziaWG: Server settings</n>
+        <name>AmneziaWG: Server settings</name>
         <description>Allow access to AmneziaWG server configuration</description>
         <patterns><pattern>api/amneziawg/server/*</pattern></patterns>
     </acl_amneziawg_server>
     <acl_amneziawg_peer>
-        <n>AmneziaWG: Server peer settings</n>
+        <name>AmneziaWG: Server peer settings</name>
         <description>Allow access to AmneziaWG server peer configuration</description>
         <patterns><pattern>api/amneziawg/peer/*</pattern></patterns>
     </acl_amneziawg_peer>
     <acl_amneziawg_service>
-        <n>AmneziaWG: Service control</n>
+        <name>AmneziaWG: Service control</name>
         <description>Allow access to AmneziaWG service reconfigure and status</description>
         <patterns>
             <pattern>api/amneziawg/service/*</pattern>
         </patterns>
     </acl_amneziawg_service>
+    <acl_amneziawg_metrics>
+        <name>AmneziaWG: Prometheus metrics</name>
+        <description>Allow read-only access to the Prometheus metrics endpoint</description>
+        <patterns>
+            <pattern>api/amneziawg/service/metrics</pattern>
+        </patterns>
+    </acl_amneziawg_metrics>
     <acl_amneziawg_import>
-        <n>AmneziaWG: Import configuration</n>
+        <name>AmneziaWG: Import configuration</name>
         <description>Allow access to AmneziaWG .conf file import parser</description>
         <patterns>
             <pattern>api/amneziawg/import/*</pattern>
         </patterns>
     </acl_amneziawg_import>
     <acl_amneziawg_ui>
-        <n>AmneziaWG: Web UI</n>
+        <name>AmneziaWG: Web UI</name>
         <description>Allow access to the AmneziaWG management page</description>
         <patterns>
             <pattern>ui/amneziawg/*</pattern>

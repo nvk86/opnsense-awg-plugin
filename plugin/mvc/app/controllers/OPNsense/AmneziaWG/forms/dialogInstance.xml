@@ -49,6 +49,7 @@
         <id>instance.description</id>
         <label>Description</label>
         <type>text</type>
+        <help>Optional note for this client tunnel. It is shown only in the OPNsense UI and does not change the generated AmneziaWG configuration.</help>
     </field>
     <field>
         <id>instance.peer_endpoint</id>

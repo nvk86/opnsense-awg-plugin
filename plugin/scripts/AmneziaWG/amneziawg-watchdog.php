@@ -174,7 +174,7 @@ foreach ($clientRows as $row) {
     $message = (string)($decoded['message'] ?? '');
     $healthSummaries[] = $row['iface'] . ':' . $status;
 
-    if ($status === 'online') {
+    if ($status === 'online' || $status === 'waiting') {
         continue;
     }
 

@@ -395,12 +395,13 @@
                         BootstrapDialog.show({
                             type: BootstrapDialog.TYPE_WARNING,
                             title: "{{ lang._('New Client Keys') }}",
-                            message: "{{ lang._('Save this peer before using QR Code or Download .conf. Saving installs the newly generated client keypair and preshared key on the server.') }}",
+                            message: "{{ lang._('Save this peer first. Then use the QR Code or Download .conf commands in the Server Peers table. Saving installs the newly generated client keypair and preshared key on the server.') }}",
                             buttons: [{label: "{{ lang._('Close') }}", action: function(d){d.close();}}]
                         });
                     } else alert(data.message || "{{ lang._('Client key generation failed') }}");
                 });
             });
+        }
 
         // Server key generation; the server public key is shown for copying to clients.
         var $serverPk = $('#{{formGridServer['edit_dialog_id']}} input[id="server.private_key"]');

@@ -364,6 +364,8 @@ if (!$ifStatus['running']) {
 } elseif (($health['status'] ?? '') === 'stopped') {
     // Runtime is up, so a cached stopped state predates the latest start.
     $connectivity = 'waiting';
+} elseif (($health['status'] ?? '') === 'waiting') {
+    $connectivity = 'waiting';
 } elseif ($age !== null && $age > 150) {
     $connectivity = 'stale';
 } else {

@@ -480,8 +480,9 @@ class ServiceController extends ApiMutableServiceControllerBase
 
         $runtimeRaw = trim((string)(new Backend())->configdRun('amneziawg status'));
         $runtime = json_decode($runtimeRaw, true);
+        $runtimeInventoryOk = is_array($runtime);
         $runtimeByInterface = [];
-        if (is_array($runtime)) {
+        if ($runtimeInventoryOk) {
             foreach (($runtime['tunnels'] ?? []) as $tunnel) {
                 if (!is_array($tunnel)) {
                     continue;
@@ -508,6 +509,9 @@ class ServiceController extends ApiMutableServiceControllerBase
                 1,
                 ['version' => $pluginVersion]
             ),
+            '# HELP opnsense_awg_runtime_inventory_ok Whether the runtime inventory could be read successfully.',
+            '# TYPE opnsense_awg_runtime_inventory_ok gauge',
+            $this->prometheusSample('opnsense_awg_runtime_inventory_ok', $runtimeInventoryOk ? 1 : 0),
             '# HELP opnsense_awg_service_enabled Whether AmneziaWG is enabled in configuration.',
             '# TYPE opnsense_awg_service_enabled gauge',
             $this->prometheusSample('opnsense_awg_service_enabled', $serviceEnabled ? 1 : 0),

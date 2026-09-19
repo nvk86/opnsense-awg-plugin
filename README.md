@@ -292,6 +292,8 @@ configctl amneziawg status
 configctl amneziawg version
 configctl amneziawg validate
 configctl amneziawg restart
+configctl amneziawg health <client-uuid>
+configctl amneziawg gateway_sync reconcile
 ```
 
 Logs:

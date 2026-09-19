@@ -94,7 +94,7 @@ function awg_health_assignment($cfg, string $iface): array
 function awg_health_native_gateway(string $assignment, string $preferred = ''): array
 {
     if ($assignment === '') {
-        return ['name' => '', 'address' => '', 'error' => 'AWG interface is not assigned in OPNsense'];
+        return ['name' => '', 'address' => '', 'force_down' => false, 'error' => 'AWG interface is not assigned in OPNsense'];
     }
     try {
         $model = new OPNsense\Routing\Gateways();
@@ -109,7 +109,12 @@ function awg_health_native_gateway(string $assignment, string $preferred = ''): 
                 continue;
             }
             if ($preferred !== '' && $address === $preferred) {
-                return ['name' => (string)($row['name'] ?? ''), 'address' => $address, 'error' => ''];
+                return [
+                    'name' => (string)($row['name'] ?? ''),
+                    'address' => $address,
+                    'force_down' => !empty($row['force_down']) && (string)$row['force_down'] !== '0',
+                    'error' => '',
+                ];
             }
             $rows[] = $row;
         }
@@ -117,17 +122,109 @@ function awg_health_native_gateway(string $assignment, string $preferred = ''): 
             return [
                 'name' => (string)($rows[0]['name'] ?? ''),
                 'address' => trim((string)($rows[0]['gateway'] ?? '')),
+                'force_down' => !empty($rows[0]['force_down']) && (string)$rows[0]['force_down'] !== '0',
                 'error' => '',
             ];
         }
         if (empty($rows)) {
-            return ['name' => '', 'address' => '', 'error' => 'No static IPv4 gateway exists on the assigned AWG interface'];
+            return ['name' => '', 'address' => '', 'force_down' => false, 'error' => 'No static IPv4 gateway exists on the assigned AWG interface'];
         }
-        return ['name' => '', 'address' => '',
+        return ['name' => '', 'address' => '', 'force_down' => false,
             'error' => 'Multiple static IPv4 gateways exist; set Health Probe Target explicitly'];
     } catch (Throwable $e) {
-        return ['name' => '', 'address' => '', 'error' => 'Unable to inspect native gateways'];
+        return ['name' => '', 'address' => '', 'force_down' => false, 'error' => 'Unable to inspect native gateways'];
     }
+}
+
+function awg_health_probe_route_marker(string $uuid): string
+{
+    return '/var/run/amneziawg-health-route-' . $uuid . '.json';
+}
+
+function awg_health_probe_route_read(string $uuid): array
+{
+    $path = awg_health_probe_route_marker($uuid);
+    if (!is_file($path)) {
+        return [];
+    }
+    $data = json_decode((string)@file_get_contents($path), true);
+    return is_array($data) ? $data : [];
+}
+
+function awg_health_probe_route_write(string $uuid, string $target, string $iface): bool
+{
+    $path = awg_health_probe_route_marker($uuid);
+    $tmp = $path . '.tmp.' . getmypid();
+    $data = [
+        'target' => $target,
+        'interface' => $iface,
+        'created_at' => time(),
+    ];
+    if (@file_put_contents(
+        $tmp,
+        json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n",
+        LOCK_EX
+    ) === false) {
+        @unlink($tmp);
+        return false;
+    }
+    @chmod($tmp, 0600);
+    if (!@rename($tmp, $path)) {
+        @unlink($tmp);
+        return false;
+    }
+    return true;
+}
+
+function awg_health_probe_route_cleanup(string $uuid): void
+{
+    $marker = awg_health_probe_route_read($uuid);
+    $target = trim((string)($marker['target'] ?? ''));
+    $iface = trim((string)($marker['interface'] ?? ''));
+    if ($target !== '' && $iface !== ''
+        && filter_var($target, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false
+        && preg_match('/^awg\d{1,2}$/D', $iface)) {
+        $out = [];
+        $rc = 1;
+        exec('/sbin/route delete -host ' . escapeshellarg($target)
+            . ' -iface ' . escapeshellarg($iface) . ' 2>/dev/null', $out, $rc);
+    }
+    @unlink(awg_health_probe_route_marker($uuid));
+}
+
+function awg_health_probe_route_ensure(string $uuid, string $target, string $iface): array
+{
+    $existing = awg_health_probe_route_read($uuid);
+    if (!empty($existing)
+        && (($existing['target'] ?? '') !== $target || ($existing['interface'] ?? '') !== $iface)) {
+        awg_health_probe_route_cleanup($uuid);
+    }
+
+    $current = awg_health_route_interface($target);
+    if ($current === $iface) {
+        return ['ok' => true, 'owned' => !empty(awg_health_probe_route_read($uuid)), 'interface' => $current];
+    }
+
+    $out = [];
+    $rc = 1;
+    exec('/sbin/route add -host ' . escapeshellarg($target)
+        . ' -iface ' . escapeshellarg($iface) . ' 2>&1', $out, $rc);
+
+    $after = awg_health_route_interface($target);
+    if ($after !== $iface) {
+        return [
+            'ok' => false,
+            'owned' => false,
+            'interface' => $after,
+            'message' => trim(implode("\n", $out)),
+            'rc' => $rc,
+        ];
+    }
+
+    // rc=0 means this probe created the route. If another actor installed the
+    // same route concurrently, do not claim ownership.
+    $owned = $rc === 0 && awg_health_probe_route_write($uuid, $target, $iface);
+    return ['ok' => true, 'owned' => $owned, 'interface' => $after];
 }
 
 function awg_health_route_interface(string $target): string
@@ -225,6 +322,7 @@ $manualStopped = is_file('/var/run/amneziawg_stopped.flag')
     || is_file('/var/run/amneziawg_stopped_' . $iface . '.flag');
 
 if (!$globalEnabled || !$instanceEnabled || $manualStopped) {
+    awg_health_probe_route_cleanup($uuid);
     $state = awg_health_update(
         $uuid,
         false,
@@ -239,6 +337,7 @@ if (!$globalEnabled || !$instanceEnabled || $manualStopped) {
 $healthEnabled = (string)($inst->health_monitor ?? '0') === '1'
     || (string)($inst->gateway_health_sync ?? '0') === '1';
 if (!$healthEnabled) {
+    awg_health_probe_route_cleanup($uuid);
     awg_health_output([
         'result' => 'skipped',
         'status' => 'disabled',
@@ -293,10 +392,22 @@ if ($target === '') {
 }
 
 $routeInterface = awg_health_route_interface($target);
-// During interface/routing reconciliation the native gateway route can be
-// temporarily absent or still point at the previous default route. That is a
-// routing-readiness condition, not proof that the AWG data plane failed.
-// Never count it toward the 3-failure debounce.
+$probeRouteOwned = false;
+
+// Force Down removes the native OPNsense gateway host route. Without an
+// independent probe path, the health check could never observe recovery and
+// clear Force Down. While the plugin owns a forced-down gateway, install a
+// temporary runtime-only /32 route through awgN solely for the health probe.
+if (($routeInterface === '' || $routeInterface !== $iface) && !empty($gateway['force_down'])) {
+    $probeRoute = awg_health_probe_route_ensure($uuid, $target, $iface);
+    if (!empty($probeRoute['ok'])) {
+        $routeInterface = (string)($probeRoute['interface'] ?? $iface);
+        $probeRouteOwned = !empty($probeRoute['owned']) || !empty(awg_health_probe_route_read($uuid));
+    }
+}
+
+// When Force Down is not active, a wrong/missing route is ordinary OPNsense
+// routing convergence. It is inconclusive and must not count toward debounce.
 if ($routeInterface === '' || $routeInterface !== $iface) {
     $message = $routeInterface === ''
         ? 'Route to health target is not ready on ' . $iface
@@ -308,6 +419,7 @@ if ($routeInterface === '' || $routeInterface !== $iface) {
         'native_gateway' => (string)$gateway['name'],
         'native_gateway_address' => (string)$gateway['address'],
         'route_interface' => $routeInterface,
+        'probe_route_owned' => $probeRouteOwned,
     ]);
     awg_health_output(['result' => 'waiting'] + $state, 0);
 }
@@ -340,6 +452,7 @@ $extra = [
     'native_gateway_address' => (string)$gateway['address'],
     'latest_handshake' => $latestHandshake,
     'route_interface' => $routeInterface,
+    'probe_route_owned' => $probeRouteOwned,
 ];
 
 if ($rc !== 0) {
@@ -355,5 +468,9 @@ if ($rc !== 0) {
 }
 
 $message = 'Online via ' . $iface . ' (' . $target . ', ' . $latency . ' ms)';
+if (!empty(awg_health_probe_route_read($uuid))) {
+    awg_health_probe_route_cleanup($uuid);
+    $extra['probe_route_owned'] = false;
+}
 $state = awg_health_update($uuid, true, 'online', $message, $latency, $extra);
 awg_health_output(['result' => 'ok'] + $state, 0);

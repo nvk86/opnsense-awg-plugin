@@ -2,7 +2,7 @@
 <model>
     <mount>//OPNsense/amneziawg/instances</mount>
     <description>AmneziaWG Instance Settings</description>
-    <version>2.0.0</version>
+    <version>2.1.0</version>
     <items>
         <!-- mount already provides the <instances> container node;
              the ArrayField below renders as <instance uuid="..."> children -->
@@ -52,6 +52,17 @@
                     <MinimumValue>576</MinimumValue>
                     <MaximumValue>9000</MaximumValue>
                 </mtu>
+                <health_monitor type="BooleanField">
+                    <Default>0</Default>
+                    <Required>N</Required>
+                </health_monitor>
+                <health_target type="TextField">
+                    <Required>N</Required>
+                </health_target>
+                <gateway_health_sync type="BooleanField">
+                    <Default>0</Default>
+                    <Required>N</Required>
+                </gateway_health_sync>
                 <jc type="IntegerField">
                     <Required>N</Required>
                     <MinimumValue>1</MinimumValue>

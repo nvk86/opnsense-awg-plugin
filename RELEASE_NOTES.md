@@ -1,14 +1,16 @@
-# opnsense-awg-plugin 2.2.0
+# opnsense-awg-plugin 2.3.0
 
-Minor release focused on visual consistency and usability.
+Minor release adding native Prometheus monitoring.
 
 ## What changed
 
-- Unified General status and service controls.
-- Moved Server Peer QR and client `.conf` export to table actions.
-- Improved Diagnostics and split Service / Watchdog log views.
-- Added clear help text across configuration fields.
+- Added a read-only Prometheus endpoint at `/api/amneziawg/service/metrics`.
+- Exposes service, client/server runtime, cached active-health, watchdog, Gateway Health Sync and handshake state.
+- Scrapes do not initiate health probes or mutate tunnel/gateway state.
+- Added a dedicated **AmneziaWG: Prometheus metrics** ACL privilege.
+- Sensitive configuration such as keys, peer endpoints, health targets and internal UUIDs is not exported as metric labels.
+- Installer now invalidates the OPNsense ACL cache after install, rollback and uninstall so newly installed privileges are visible immediately.
 
 ## Upgrade
 
-Install normally over 2.1.1. Existing clients, servers, peers, keys, gateways and health settings are preserved.
+Install normally over 2.2.0. Existing clients, servers, peers, keys, gateways, health settings and policy-routing configuration are preserved.

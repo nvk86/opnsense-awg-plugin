@@ -47,9 +47,10 @@ jobs:
           grep -Fq 'amneziawg gateway_sync_release' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/InstanceController.php
           grep -Fq "pluginctl -c monitor" plugin/scripts/AmneziaWG/amneziawg-gateway-sync.php
           grep -Fq "watcher_reconciled" plugin/scripts/AmneziaWG/amneziawg-gateway-sync.php
-          grep -Fq '<id>instance.health_runtime</id>' plugin/mvc/app/controllers/OPNsense/AmneziaWG/forms/dialogInstance.xml
-          grep -Fq "'healthstatus'" plugin/mvc/app/views/OPNsense/AmneziaWG/general.volt
-          grep -Fq "health_runtime" plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/InstanceController.php
+          ! grep -Fq '<id>instance.health_runtime</id>' plugin/mvc/app/controllers/OPNsense/AmneziaWG/forms/dialogInstance.xml
+          grep -Fq 'id="badge_health"' plugin/mvc/app/views/OPNsense/AmneziaWG/general.volt
+          grep -Fq 'healthSummary' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php
+          grep -Fq "Route to health target currently uses" plugin/scripts/AmneziaWG/amneziawg-health.php
           grep -Fq "awg_health_cache_invalidate_iface" plugin/scripts/AmneziaWG/amneziawg-service-control.php
           grep -Fq "@unlink(AWG_STOPPED_FLAG)" plugin/scripts/AmneziaWG/amneziawg-service-control.php
           grep -Fq "stale service-level stopped flag remained" install.sh

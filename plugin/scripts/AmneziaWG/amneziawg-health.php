@@ -130,6 +130,22 @@ function awg_health_native_gateway(string $assignment, string $preferred = ''): 
     }
 }
 
+function awg_health_route_interface(string $target): string
+{
+    $out = [];
+    $rc = 1;
+    exec('/sbin/route -n get ' . escapeshellarg($target) . ' 2>/dev/null', $out, $rc);
+    if ($rc !== 0) {
+        return '';
+    }
+    foreach ($out as $line) {
+        if (preg_match('/^\s*interface:\s*(\S+)\s*$/i', $line, $m)) {
+            return trim($m[1]);
+        }
+    }
+    return '';
+}
+
 function awg_health_latest_handshake(string $iface): int
 {
     $out = [];
@@ -275,6 +291,19 @@ if ($target === '') {
     awg_health_output(['result' => 'failed'] + $state, 0);
 }
 
+$routeInterface = awg_health_route_interface($target);
+// A custom target can otherwise accidentally follow the firewall's normal
+// host routing table instead of the AWG tunnel. The native gateway itself is
+// exempt because OPNsense may represent a Far Gateway without a conventional
+// host route while still sending gateway probes on the assigned interface.
+if ($preferred !== '' && $target !== (string)$gateway['address']
+    && $routeInterface !== '' && $routeInterface !== $iface) {
+    $state = awg_health_update($uuid, false, 'offline',
+        'Health Probe Target routes via ' . $routeInterface . ', not ' . $iface, null,
+        ['interface' => $iface, 'source' => $source, 'target' => $target, 'route_interface' => $routeInterface]);
+    awg_health_output(['result' => 'failed'] + $state, 0);
+}
+
 $start = microtime(true);
 $out = [];
 $rc = 1;
@@ -302,6 +331,7 @@ $extra = [
     'native_gateway' => (string)$gateway['name'],
     'native_gateway_address' => (string)$gateway['address'],
     'latest_handshake' => $latestHandshake,
+    'route_interface' => $routeInterface,
 ];
 
 if ($rc !== 0) {

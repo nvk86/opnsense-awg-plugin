@@ -144,6 +144,31 @@ function awg_gs_find_persisted_gateway(OPNsense\Routing\Gateways $model, array $
     return null;
 }
 
+function awg_gs_refresh_gateway_watcher(): array
+{
+    // OPNsense overlays dpinger_status() with /tmp/gateways.status whenever
+    // the live report has loss='~'. After native monitoring is disabled, an
+    // old watcher entry can therefore mask a newly persisted Force Down state.
+    // Restart only the Gateway Watcher once when we adopt the gateway so its
+    // cache is rebuilt without the now-unmonitored AWG member.
+    $out = [];
+    $rc = 1;
+    exec('/usr/local/sbin/pluginctl -c monitor ' . escapeshellarg(':watcher:') . ' 2>&1', $out, $rc);
+
+    if ($rc === 0) {
+        // gateway_watcher.php unlinks this file on startup. Remove any residual
+        // cache as well for the no-other-dpinger case; the restarted watcher
+        // will repopulate it from fresh state.
+        @unlink('/tmp/gateways.status');
+    }
+
+    return [
+        'ok' => $rc === 0,
+        'message' => trim(implode("\n", $out)),
+        'rc' => $rc,
+    ];
+}
+
 function awg_gs_alarm(string $gateway): array
 {
     if ($gateway === '' || !preg_match('/^[A-Za-z0-9_.:-]+$/D', $gateway)) {
@@ -200,6 +225,7 @@ function awg_gs_release_record(string $uuid, array $record): array
         'force_down' => $original === '1',
         'changed' => $changed,
         'released' => true,
+        'watcher_refresh' => $watcherRefresh,
         'alarm' => $alarm,
         'message' => $alarm['ok']
             ? 'Gateway Health Sync released; original Force Down restored'
@@ -333,11 +359,38 @@ function awg_gs_sync_one(string $uuid, string $healthState): array
             'original_force_down' => !empty($row['force_down']) && (string)$row['force_down'] !== '0',
             'created' => false,
             'tracked_at' => time(),
+            'watcher_reconciled' => false,
             'alarm_pending' => false,
         ];
         if (!awg_gs_registry_write($registry)) {
             return ['result' => 'warning', 'instance' => $uuid, 'gateway' => $gwName,
                 'message' => 'Could not persist gateway ownership registry'];
+        }
+    }
+
+    // Existing 2.1.0 pre-release registries do not have this flag, so
+    // upgrading the test build automatically performs the one-time watcher
+    // cache reconciliation before the next Force Down transition.
+    $registry = awg_gs_registry_read();
+    $watcherReconciled = !empty($registry[$uuid]['watcher_reconciled']);
+    $watcherRefresh = ['ok' => true, 'message' => '', 'rc' => 0];
+    if (!$watcherReconciled) {
+        $watcherRefresh = awg_gs_refresh_gateway_watcher();
+        if (!$watcherRefresh['ok']) {
+            return [
+                'result' => 'warning',
+                'instance' => $uuid,
+                'gateway' => $gwName,
+                'gateway_address' => $gwAddress,
+                'changed' => false,
+                'watcher_refresh' => $watcherRefresh,
+                'message' => 'Gateway Watcher cache could not be reconciled; Force Down was not changed',
+            ];
+        }
+        $registry = awg_gs_registry_read();
+        if (isset($registry[$uuid])) {
+            $registry[$uuid]['watcher_reconciled'] = true;
+            awg_gs_registry_write($registry);
         }
     }
 

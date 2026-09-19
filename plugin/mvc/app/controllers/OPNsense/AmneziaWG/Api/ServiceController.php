@@ -174,6 +174,92 @@ class ServiceController extends ApiMutableServiceControllerBase
     }
 
     /**
+     * Aggregate active client health for the General page.
+     *
+     * The badge intentionally shows the worst monitored client only; detailed
+     * per-client health remains in Diagnostics.
+     */
+    private function healthSummary(): array
+    {
+        $config = \OPNsense\Core\Config::getInstance()->object();
+        $clients = [];
+        $maxFailures = 0;
+        $hasOffline = false;
+        $hasWaiting = false;
+        $hasStale = false;
+        $hasStopped = false;
+        $monitored = 0;
+
+        foreach (($config->OPNsense->amneziawg->instances->instance ?? []) as $inst) {
+            if ((string)($inst->enabled ?? '0') !== '1'
+                || (string)($inst->health_monitor ?? '0') !== '1') {
+                continue;
+            }
+
+            $uuid = (string)$inst['uuid'];
+            $name = trim((string)($inst->name ?? ''));
+            if ($name === '') {
+                $name = 'awg' . (string)(int)($inst->interface_number ?? 0);
+            }
+
+            $monitored++;
+            $path = '/var/run/amneziawg-health-' . preg_replace('/[^a-fA-F0-9\-]/', '', $uuid) . '.json';
+            $health = is_file($path) ? json_decode((string)@file_get_contents($path), true) : null;
+            $state = 'waiting';
+            $failures = 0;
+
+            if (is_array($health) && (int)($health['checked_at'] ?? 0) > 0) {
+                $age = time() - (int)$health['checked_at'];
+                if (($health['status'] ?? '') === 'stopped') {
+                    $state = 'stopped';
+                    $hasStopped = true;
+                } elseif (($health['status'] ?? '') === 'waiting') {
+                    $state = 'waiting';
+                    $hasWaiting = true;
+                } elseif ($age > 150) {
+                    $state = 'stale';
+                    $hasStale = true;
+                } elseif (!empty($health['online'])) {
+                    $state = 'online';
+                } else {
+                    $state = 'offline';
+                    $failures = (int)($health['consecutive_failures'] ?? 0);
+                    $maxFailures = max($maxFailures, $failures);
+                    $hasOffline = true;
+                }
+            } else {
+                $hasWaiting = true;
+            }
+
+            $clients[] = [
+                'name' => $name,
+                'state' => $state,
+                'failures' => $failures,
+            ];
+        }
+
+        if ($monitored === 0) {
+            return ['state'=>'disabled','label'=>'health: disabled','failures'=>0,'monitored'=>0,'clients'=>[]];
+        }
+        if ($hasOffline) {
+            $label = $maxFailures > 0 && $maxFailures < 3
+                ? 'health: offline ' . $maxFailures . '/3'
+                : 'health: offline';
+            return ['state'=>'offline','label'=>$label,'failures'=>$maxFailures,'monitored'=>$monitored,'clients'=>$clients];
+        }
+        if ($hasStale) {
+            return ['state'=>'stale','label'=>'health: stale','failures'=>0,'monitored'=>$monitored,'clients'=>$clients];
+        }
+        if ($hasWaiting) {
+            return ['state'=>'waiting','label'=>'health: waiting','failures'=>0,'monitored'=>$monitored,'clients'=>$clients];
+        }
+        if ($hasStopped) {
+            return ['state'=>'stopped','label'=>'health: stopped','failures'=>0,'monitored'=>$monitored,'clients'=>$clients];
+        }
+        return ['state'=>'online','label'=>'health: online','failures'=>0,'monitored'=>$monitored,'clients'=>$clients];
+    }
+
+    /**
      * GET /api/amneziawg/service/tunnel_status
      */
     public function tunnelStatusAction()
@@ -182,9 +268,13 @@ class ServiceController extends ApiMutableServiceControllerBase
         $result  = $backend->configdRun('amneziawg status');
         $decoded = json_decode($result, true);
         if (json_last_error() === JSON_ERROR_NONE) {
+            if (!is_array($decoded)) {
+                $decoded = [];
+            }
+            $decoded['health'] = $this->healthSummary();
             return $decoded;
         }
-        return ['status' => 'error', 'message' => $result];
+        return ['status' => 'error', 'message' => $result, 'health' => $this->healthSummary()];
     }
 
     /**

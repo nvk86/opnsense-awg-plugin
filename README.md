@@ -251,6 +251,33 @@ Table = off
 
 OPNsense remains responsible for policy routing; `awg-quick` does not install its own default routes.
 
+## Prometheus metrics
+
+The plugin exposes a read-only Prometheus text endpoint at:
+
+```text
+GET /api/amneziawg/service/metrics
+```
+
+The endpoint exports service, client/server runtime, cached active-health, watchdog and Gateway Health Sync state. It only reads the existing runtime/health cache; a Prometheus scrape never starts a health probe and never changes tunnel or gateway state.
+
+A dedicated **AmneziaWG: Prometheus metrics** ACL privilege can be assigned to a monitoring-only API user without granting service-control access. Labels intentionally contain only the configured tunnel name and interface; keys, peer endpoints, health targets and instance UUIDs are not exported.
+
+Example Prometheus job:
+
+```yaml
+- job_name: opnsense-awg
+  scheme: https
+  metrics_path: /api/amneziawg/service/metrics
+  basic_auth:
+    username: API_KEY
+    password: API_SECRET
+  static_configs:
+    - targets: ['opnsense.example.internal']
+```
+
+The active health scheduler runs once per minute, so a 30-60 second scrape interval is normally sufficient.
+
 ## Server configuration
 
 Open **VPN → AmneziaWG → Server**.

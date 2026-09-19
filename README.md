@@ -27,10 +27,15 @@ AmneziaWG is a WireGuard-compatible VPN protocol with additional traffic obfusca
 
 ## What's new in 2.3.0
 
-Version **2.3.0** adds native read-only Prometheus telemetry for AmneziaWG while preserving the 2.2.x runtime and configuration model.
+Version **2.3.0** consolidates the active health and gateway failover work from 2.1.x, the UI/UX improvements from 2.2.0, and adds native read-only Prometheus telemetry.
 
+- **Active per-client health monitoring** verifies the real AWG data plane with ICMP probes instead of treating an existing interface as proof of connectivity.
+- **Gateway Health Sync** feeds debounced tunnel health into the native OPNsense gateway **Force Down** state, allowing Gateway Groups and policy routing to fail over without `dpinger`.
+- After three consecutive failed probes the affected gateway is forced down; the optional watchdog can restart only that client with a 10-minute per-client cooldown, and the next successful probe restores the gateway.
+- The 2.1.1 route-recovery fix is included: after an `awgN` interface is recreated, health can ask OPNsense to reconcile the native gateway host route before probing. The plugin still does not take permanent ownership of that route.
+- The interface includes the 2.2.0 UI/UX refresh: clearer aggregate status and diagnostics, improved client/server/peer actions and provisioning, structured service/watchdog log views, and clearer help text across configuration fields.
 - Added `GET /api/amneziawg/service/metrics` using the Prometheus text exposition format.
-- Exposes service state, client/server runtime state, cached active-health state, latency/failure timestamps, watchdog state, Gateway Health Sync state and handshake timestamps.
+- Prometheus exposes service state, client/server runtime state, cached active-health state, latency/failure timestamps, watchdog state, Gateway Health Sync state and handshake timestamps.
 - Scraping is passive: the endpoint reads existing runtime and health-cache state and never starts a health probe or changes tunnel/gateway state.
 - Added a dedicated **AmneziaWG: Prometheus metrics** ACL privilege for monitoring-only API users.
 - Metric labels are intentionally limited to configured tunnel name and interface; keys, peer endpoints, health targets and internal UUIDs are not exported.

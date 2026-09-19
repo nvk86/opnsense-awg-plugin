@@ -11,6 +11,7 @@ Feature release adding active client health monitoring and native OPNsense Gatew
 - OPNsense's routing alarm path is invoked whenever `Force Down` changes, so normal Gateway Groups and PF policy are rebuilt.
 - The existing gateway remains user-owned. Its original `Force Down` value is restored when sync is disabled, the client is deleted, or the plugin is uninstalled.
 - Native gateway monitoring must be disabled while plugin Gateway Health Sync is enabled.
+- On first adoption after moving a gateway away from `dpinger`, the plugin performs a one-time OPNsense Gateway Watcher cache reconciliation so stale monitor state cannot mask plugin-driven `Force Down` during Gateway Group/PF regeneration.
 - The global Watchdog can additionally restart only the unhealthy AWG client after the same three-failure threshold. Restart cooldown is 10 minutes.
 - Health monitoring and gateway synchronization continue to operate even when automatic Watchdog restart is disabled.
 - Diagnostics now includes active health, probe target, latency, consecutive failures, native gateway status, `Force Down`, and loaded PF `route-to` state.

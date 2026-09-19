@@ -25,17 +25,18 @@ AmneziaWG is a WireGuard-compatible VPN protocol with additional traffic obfusca
 
 > This is a third-party community plugin. It is not an official OPNsense or AmneziaVPN component.
 
-## What's new in 2.2.0
+## What's new in 2.3.0
 
-Version **2.2.0** consolidates the active health and gateway failover work from 2.1.x and adds a broad UI/UX refresh.
+Version **2.3.0** adds native read-only Prometheus telemetry for AmneziaWG while preserving the 2.2.x runtime and configuration model.
 
-- **Active per-client health monitoring** verifies the real AWG data plane with ICMP probes instead of treating an existing interface as proof of connectivity.
-- **Gateway Health Sync** feeds debounced tunnel health into the native OPNsense gateway **Force Down** state, allowing Gateway Groups and policy routing to fail over without `dpinger`.
-- After three consecutive failed probes the affected gateway is forced down; the optional watchdog can restart only that client with a 10-minute per-client cooldown, and the next successful probe restores the gateway.
-- The 2.1.1 route-recovery fix is included: after an `awgN` interface is recreated, health can ask OPNsense to reconcile the native gateway host route before probing. The plugin still does not take permanent ownership of that route.
-- The interface has been polished throughout: clearer aggregate status and diagnostics, improved client/server/peer actions and provisioning, structured service/watchdog log views, and clearer help text across configuration fields.
+- Added `GET /api/amneziawg/service/metrics` using the Prometheus text exposition format.
+- Exposes service state, client/server runtime state, cached active-health state, latency/failure timestamps, watchdog state, Gateway Health Sync state and handshake timestamps.
+- Scraping is passive: the endpoint reads existing runtime and health-cache state and never starts a health probe or changes tunnel/gateway state.
+- Added a dedicated **AmneziaWG: Prometheus metrics** ACL privilege for monitoring-only API users.
+- Metric labels are intentionally limited to configured tunnel name and interface; keys, peer endpoints, health targets and internal UUIDs are not exported.
+- Runtime inventory failures are exported explicitly so a successful HTTP scrape cannot hide an unavailable backend inventory.
 
-Existing 2.1.1 client/server configuration, keys, gateways and health settings are preserved.
+Existing 2.2.0 clients, servers, peers, keys, gateways, health settings and policy-routing configuration are preserved.
 
 See [RELEASE_NOTES.md](RELEASE_NOTES.md) and [Changelog.md](Changelog.md) for the detailed release history.
 
@@ -92,7 +93,7 @@ The original copyright notice and BSD 2-Clause License are retained in [LICENSE]
 
 ## Installer and package handling
 
-The v2.2.0 installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
+The v2.3.0 installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
 
 Current supported package releases:
 

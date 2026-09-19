@@ -50,5 +50,7 @@ jobs:
           grep -Fq '<id>instance.health_runtime</id>' plugin/mvc/app/controllers/OPNsense/AmneziaWG/forms/dialogInstance.xml
           grep -Fq "'healthstatus'" plugin/mvc/app/views/OPNsense/AmneziaWG/general.volt
           grep -Fq "health_runtime" plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/InstanceController.php
+          grep -Fq "awg_health_cache_invalidate_iface" plugin/scripts/AmneziaWG/amneziawg-service-control.php
+          grep -Fq "\$connectivity = 'waiting'" plugin/scripts/AmneziaWG/amneziawg-ifstats.php
           grep -Fq 'amneziawg-health.php' plugin/scripts/AmneziaWG/amneziawg-watchdog.php
           grep -Fq 'Force Down' README.md

@@ -8,7 +8,7 @@
 - Existing gateways remain user-owned. The plugin records and restores their original `Force Down` value when synchronization is released; it never creates or deletes AWG gateways.
 - Native gateway monitoring must be disabled while Gateway Health Sync is active so plugin health is the single gateway-health source.
 - Extended the watchdog to restart only the unhealthy client after the same three-failure threshold, with a 10-minute restart cooldown. Active health and gateway synchronization continue to work when automatic restart is disabled.
-- Added an active **Health** column to the Clients grid, including online/offline, transient failure count, stale, waiting, stopped and disabled states.
+- Added an aggregate **Health** badge to the General page. It shows the worst monitored client state (`online`, `offline 1/3`, `offline 2/3`, `offline`, `waiting`, `stale`, or `stopped`); detailed per-client health remains in Diagnostics.
 - Added on-demand **Test Health** and health/native-gateway/PF status to Diagnostics.
 - Added cleanup/reconciliation on client deletion and plugin uninstall.
 - Added one-time OPNsense Gateway Watcher cache reconciliation when adopting a gateway after native `dpinger` monitoring is disabled, preventing stale monitor state from masking plugin-driven `Force Down`.

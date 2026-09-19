@@ -31,17 +31,36 @@ function wdg_health_cache_path(string $uuid): string
     return '/var/run/amneziawg-health-' . $uuid . '.json';
 }
 
-function wdg_mark_restart(string $uuid): void
+function wdg_mark_restart(string $uuid, array $previous = []): void
 {
     $path = wdg_health_cache_path($uuid);
-    if (!is_file($path)) {
-        return;
+
+    // restart_instance intentionally invalidates the old health cache because
+    // pre-restart probe data no longer describes the new runtime. Rebuild a
+    // minimal "waiting" state after a successful watchdog restart so the
+    // restart cooldown survives that invalidation and the UI does not keep
+    // showing the pre-restart failure count.
+    $state = [];
+    if (is_file($path)) {
+        $decoded = json_decode((string)@file_get_contents($path), true);
+        if (is_array($decoded)) {
+            $state = $decoded;
+        }
     }
-    $state = json_decode((string)@file_get_contents($path), true);
-    if (!is_array($state)) {
-        return;
+    if (empty($state) && !empty($previous)) {
+        $state = $previous;
     }
-    $state['last_restart'] = time();
+
+    $now = time();
+    $state['online'] = false;
+    $state['status'] = 'waiting';
+    $state['message'] = 'Tunnel restarted by watchdog; waiting for health recheck';
+    $state['latency_ms'] = null;
+    $state['checked_at'] = $now;
+    $state['checked_at_iso'] = date('c', $now);
+    $state['consecutive_failures'] = 0;
+    $state['last_restart'] = $now;
+
     $tmp = $path . '.tmp.' . getmypid();
     if (@file_put_contents(
         $tmp,
@@ -200,7 +219,7 @@ foreach ($clientRows as $row) {
     $restart = trim((string)$backend->configdRun('amneziawg restart_instance ' . $row['iface']));
     wdg_log('restart_instance ' . $row['iface'] . ' result: ' . substr($restart, 0, 200));
     if (stripos($restart, 'OK') !== false && stripos($restart, 'ERROR') === false) {
-        wdg_mark_restart($row['uuid']);
+        wdg_mark_restart($row['uuid'], $decoded);
     }
 }
 

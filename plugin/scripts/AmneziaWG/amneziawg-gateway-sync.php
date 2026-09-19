@@ -181,8 +181,27 @@ function awg_gs_alarm(string $gateway): array
     return ['ok' => $rc === 0, 'message' => trim(implode("\n", $out)), 'rc' => $rc];
 }
 
+function awg_gs_cleanup_probe_route(string $uuid): void
+{
+    $path = '/var/run/amneziawg-health-route-' . $uuid . '.json';
+    if (!is_file($path)) {
+        return;
+    }
+    $data = json_decode((string)@file_get_contents($path), true);
+    $target = trim((string)($data['target'] ?? ''));
+    $iface = trim((string)($data['interface'] ?? ''));
+    if ($target !== '' && $iface !== ''
+        && filter_var($target, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false
+        && preg_match('/^awg\d{1,2}$/D', $iface)) {
+        @exec('/sbin/route delete -host ' . escapeshellarg($target)
+            . ' -iface ' . escapeshellarg($iface) . ' >/dev/null 2>&1');
+    }
+    @unlink($path);
+}
+
 function awg_gs_release_record(string $uuid, array $record): array
 {
+    awg_gs_cleanup_probe_route($uuid);
     $model = new OPNsense\Routing\Gateways();
     $row = awg_gs_find_persisted_gateway($model, $record);
     $name = (string)($record['name'] ?? '');
@@ -225,7 +244,6 @@ function awg_gs_release_record(string $uuid, array $record): array
         'force_down' => $original === '1',
         'changed' => $changed,
         'released' => true,
-        'watcher_refresh' => $watcherRefresh,
         'alarm' => $alarm,
         'message' => $alarm['ok']
             ? 'Gateway Health Sync released; original Force Down restored'

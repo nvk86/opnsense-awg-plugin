@@ -56,6 +56,44 @@ class InstanceController extends ApiMutableModelControllerBase
                 $row['runtime'] = 'no_handshake';
             }
 
+            // Per-client health only: every row reads only its own UUID cache.
+            // The aggregate General-page health summary is computed separately.
+            $healthEnabled = (string)($row['health_monitor'] ?? '0') === '1';
+            $row['health_failures'] = 0;
+            $row['health_message'] = '';
+            if (!$healthEnabled) {
+                $row['health_runtime'] = 'disabled';
+            } elseif ($row['runtime'] === 'stopped') {
+                $row['health_runtime'] = 'stopped';
+            } else {
+                $healthPath = '/var/run/amneziawg-health-' . preg_replace(
+                    '/[^a-fA-F0-9\-]/',
+                    '',
+                    (string)($row['uuid'] ?? '')
+                ) . '.json';
+                $health = is_file($healthPath)
+                    ? json_decode((string)@file_get_contents($healthPath), true)
+                    : null;
+
+                if (!is_array($health) || (int)($health['checked_at'] ?? 0) <= 0) {
+                    $row['health_runtime'] = 'waiting';
+                } elseif (($health['status'] ?? '') === 'waiting') {
+                    $row['health_runtime'] = 'waiting';
+                    $row['health_message'] = (string)($health['message'] ?? '');
+                } elseif (($health['status'] ?? '') === 'stopped') {
+                    // Runtime is currently up, so this cache predates the latest start.
+                    $row['health_runtime'] = 'waiting';
+                } elseif ((time() - (int)$health['checked_at']) > 150) {
+                    $row['health_runtime'] = 'stale';
+                } elseif (!empty($health['online'])) {
+                    $row['health_runtime'] = 'online';
+                    $row['health_message'] = (string)($health['message'] ?? '');
+                } else {
+                    $row['health_runtime'] = 'offline';
+                    $row['health_failures'] = (int)($health['consecutive_failures'] ?? 0);
+                    $row['health_message'] = (string)($health['message'] ?? '');
+                }
+            }
         }
         unset($row);
         return $result;

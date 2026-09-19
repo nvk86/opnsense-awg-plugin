@@ -57,7 +57,7 @@ jobs:
 
       - name: v2.1.0 health integration
         run: |
-          grep -Fq 'PLUGIN_VERSION="2.2.0"' install.sh
+          grep -Fq 'PLUGIN_VERSION="2.3.0"' install.sh
           grep -Fq '<version>2.1.0</version>' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
           grep -Fq '<health_monitor type="BooleanField">' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
           grep -Fq '<gateway_health_sync type="BooleanField">' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml

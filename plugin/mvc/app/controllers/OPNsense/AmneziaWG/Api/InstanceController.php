@@ -31,7 +31,7 @@ class InstanceController extends ApiMutableModelControllerBase
     {
         $result = $this->searchBase(
             'instance',
-            ['enabled', 'name', 'description', 'interface_number', 'peer_endpoint']
+            ['enabled', 'name', 'description', 'interface_number', 'peer_endpoint', 'health_monitor']
         );
 
         $status = json_decode((string)(new Backend())->configdRun('amneziawg status'), true);

@@ -227,6 +227,25 @@ function awg_health_probe_route_ensure(string $uuid, string $target, string $ifa
     return ['ok' => true, 'owned' => $owned, 'interface' => $after];
 }
 
+function awg_health_reconcile_gateway_route(string $gateway): array
+{
+    if ($gateway === '' || !preg_match('/^[A-Za-z0-9_.:-]+$/D', $gateway)) {
+        return ['ok' => false, 'message' => 'Invalid native gateway name', 'rc' => 1];
+    }
+
+    $out = [];
+    $rc = 1;
+    exec('/usr/local/bin/flock -n -E 0 -o /tmp/filter_reload_gateway.lock '
+        . '/usr/local/etc/rc.routing_configure alarm '
+        . escapeshellarg($gateway) . ' 2>&1', $out, $rc);
+
+    return [
+        'ok' => $rc === 0,
+        'message' => trim(implode("\n", $out)),
+        'rc' => $rc,
+    ];
+}
+
 function awg_health_route_interface(string $target): string
 {
     $out = [];
@@ -393,11 +412,26 @@ if ($target === '') {
 
 $routeInterface = awg_health_route_interface($target);
 $probeRouteOwned = false;
+$routeReconciled = false;
 
-// Force Down removes the native OPNsense gateway host route. Without an
-// independent probe path, the health check could never observe recovery and
-// clear Force Down. While the plugin owns a forced-down gateway, install a
-// temporary runtime-only /32 route through awgN solely for the health probe.
+// Restarting/recreating awgN removes the kernel host route owned by the native
+// OPNsense gateway. If the gateway itself is not Force Down, ask OPNsense to
+// rebuild its own route before declaring health inconclusive. This keeps route
+// ownership native to OPNsense and avoids a permanent plugin-created route.
+if (($routeInterface === '' || $routeInterface !== $iface)
+    && empty($gateway['force_down'])
+    && (string)$gateway['name'] !== '') {
+    $routeRepair = awg_health_reconcile_gateway_route((string)$gateway['name']);
+    if (!empty($routeRepair['ok'])) {
+        $routeInterface = awg_health_route_interface($target);
+        $routeReconciled = $routeInterface === $iface;
+    }
+}
+
+// Force Down can intentionally remove the native OPNsense gateway host route.
+// Without an independent probe path, health could never observe recovery and
+// clear Force Down. While forced down, install a temporary runtime-only /32
+// route through awgN solely for the health probe.
 if (($routeInterface === '' || $routeInterface !== $iface) && !empty($gateway['force_down'])) {
     $probeRoute = awg_health_probe_route_ensure($uuid, $target, $iface);
     if (!empty($probeRoute['ok'])) {
@@ -419,6 +453,7 @@ if ($routeInterface === '' || $routeInterface !== $iface) {
         'native_gateway' => (string)$gateway['name'],
         'native_gateway_address' => (string)$gateway['address'],
         'route_interface' => $routeInterface,
+        'route_reconciled' => $routeReconciled,
         'probe_route_owned' => $probeRouteOwned,
     ]);
     awg_health_output(['result' => 'waiting'] + $state, 0);
@@ -452,6 +487,7 @@ $extra = [
     'native_gateway_address' => (string)$gateway['address'],
     'latest_handshake' => $latestHandshake,
     'route_interface' => $routeInterface,
+    'route_reconciled' => $routeReconciled,
     'probe_route_owned' => $probeRouteOwned,
 ];
 

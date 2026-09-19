@@ -56,40 +56,6 @@ class InstanceController extends ApiMutableModelControllerBase
                 $row['runtime'] = 'no_handshake';
             }
 
-            // Active health state for the Clients grid. Health monitoring is
-            // deliberately separate from runtime/handshake status: an AWG
-            // interface may be up while its data plane is unreachable.
-            $healthEnabled = (string)($row['health_monitor'] ?? '0') === '1';
-            $row['health_failures'] = 0;
-            if (!$healthEnabled) {
-                $row['health_runtime'] = 'disabled';
-            } else {
-                $healthPath = '/var/run/amneziawg-health-' . preg_replace(
-                    '/[^a-fA-F0-9\-]/',
-                    '',
-                    (string)($row['uuid'] ?? '')
-                ) . '.json';
-                $health = is_file($healthPath)
-                    ? json_decode((string)@file_get_contents($healthPath), true)
-                    : null;
-
-                if ($row['runtime'] === 'stopped') {
-                    $row['health_runtime'] = 'stopped';
-                } elseif (!is_array($health) || (int)($health['checked_at'] ?? 0) <= 0) {
-                    $row['health_runtime'] = 'waiting';
-                } elseif (($health['status'] ?? '') === 'stopped') {
-                    // A running interface with a cached stopped state means
-                    // lifecycle changed since the last active probe.
-                    $row['health_runtime'] = 'waiting';
-                } elseif ((time() - (int)$health['checked_at']) > 150) {
-                    $row['health_runtime'] = 'stale';
-                } elseif (!empty($health['online'])) {
-                    $row['health_runtime'] = 'online';
-                } else {
-                    $row['health_runtime'] = 'offline';
-                    $row['health_failures'] = (int)($health['consecutive_failures'] ?? 0);
-                }
-            }
         }
         unset($row);
         return $result;

@@ -222,6 +222,35 @@ class ServiceController extends ApiMutableServiceControllerBase
 
 
     /**
+     * POST /api/amneziawg/service/health/<uuid>
+     * Runs one active client data-plane probe immediately.
+     */
+    public function healthAction($uuid = '')
+    {
+        if (!$this->request->isPost()) {
+            return ['result' => 'failed', 'message' => 'POST required'];
+        }
+        $uuid = (string)$uuid;
+        if (!preg_match('/^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$/', $uuid)) {
+            return ['result' => 'failed', 'message' => 'Invalid client UUID'];
+        }
+        $model = new \OPNsense\AmneziaWG\Instance();
+        if ($model->getNodeByReference('instance.' . $uuid) === null) {
+            return ['result' => 'failed', 'message' => 'Unknown client instance'];
+        }
+
+        $backend = new Backend();
+        $output = trim((string)$backend->configdRun('amneziawg health ' . $uuid));
+        if ($output === '') {
+            return ['result' => 'failed', 'message' => 'No response from health probe'];
+        }
+        $decoded = json_decode($output, true);
+        return json_last_error() === JSON_ERROR_NONE
+            ? $decoded
+            : ['result' => 'failed', 'message' => $output];
+    }
+
+    /**
      * POST /api/amneziawg/service/log
      * Returns last 150 lines of amneziawg.log (POST-only: log may contain IPs)
      */

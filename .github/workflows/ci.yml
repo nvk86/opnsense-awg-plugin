@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: sh -n install.sh
+
+      - name: PHP syntax
+        run: |
+          set -e
+          find plugin -type f -name '*.php' -print0 |
+            while IFS= read -r -d '' file; do
+              php -l "$file"
+            done
+
+      - name: XML syntax
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+          for path in pathlib.Path("plugin").rglob("*.xml"):
+              ET.parse(path)
+              print(path)
+          PY
+
+      - name: v2.1.0 health integration
+        run: |
+          grep -Fq 'PLUGIN_VERSION="2.1.0"' install.sh
+          grep -Fq '<version>2.1.0</version>' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
+          grep -Fq '<health_monitor type="BooleanField">' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
+          grep -Fq '<gateway_health_sync type="BooleanField">' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
+          grep -Fq '[health]' plugin/service/conf/actions.d/actions_amneziawg.conf
+          grep -Fq '[gateway_sync]' plugin/service/conf/actions.d/actions_amneziawg.conf
+          grep -Fq 'amneziawg-health.php' plugin/scripts/AmneziaWG/amneziawg-watchdog.php
+          grep -Fq 'Force Down' README.md

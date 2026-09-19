@@ -137,6 +137,27 @@
                                 default:
                                     return '<span class="label label-default">?</span>';
                             }
+                        },
+                        'healthstatus': function (column, row) {
+                            var title = $('<div>').text(row.health_message || '').html();
+                            switch (row.health_runtime) {
+                                case 'online':
+                                    return '<span class="label label-success" title="' + title + '">{{ lang._('online') }}</span>';
+                                case 'offline':
+                                    var failures = parseInt(row.health_failures || 0, 10);
+                                    var suffix = failures > 0 && failures < 3 ? ' ' + failures + '/3' : '';
+                                    return '<span class="label label-danger" title="' + title + '">{{ lang._('offline') }}' + suffix + '</span>';
+                                case 'waiting':
+                                    return '<span class="label label-info" title="' + title + '">{{ lang._('waiting') }}</span>';
+                                case 'stale':
+                                    return '<span class="label label-warning">{{ lang._('stale') }}</span>';
+                                case 'stopped':
+                                    return '<span class="label label-default">{{ lang._('stopped') }}</span>';
+                                case 'disabled':
+                                    return '<span class="label label-default">{{ lang._('disabled') }}</span>';
+                                default:
+                                    return '<span class="label label-default">?</span>';
+                            }
                         }
 
                         }
@@ -575,6 +596,14 @@
         }
         updateStatus();
         _statusTimer = setInterval(updateStatus, 10000);
+
+        // Health probes are per client and run independently. Refresh the
+        // Clients grid so each Health cell follows only that tunnel's cache.
+        var _clientGridTimer = setInterval(function () {
+            if (!_statusPaused && $('#{{formGridInstance['table_id']}}').is(':visible')) {
+                $('#{{formGridInstance['table_id']}}').bootgrid('reload');
+            }
+        }, 30000);
 
         // ── Start / Stop / Restart (service level: all tunnels) ───────
         function serviceAction(action, confirmMsg) {

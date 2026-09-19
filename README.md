@@ -27,16 +27,17 @@ AmneziaWG is a WireGuard-compatible VPN protocol with additional traffic obfusca
 
 ## What's new in 2.2.0
 
-Version **2.2.0** focuses on UI consistency and everyday usability.
+Version **2.2.0** consolidates the active health and gateway failover work from 2.1.x and adds a broad UI/UX refresh.
 
-- General now uses compact aggregate **Clients / Servers / Health** status badges and consistent **Start All / Stop All / Restart All** controls.
-- Server Peer provisioning exposes **QR Code** and **Download .conf** directly in the peer table.
-- Diagnostics use clearer state badges, and Logs are split into **Service Log** and **Watchdog Log** views.
-- Configuration fields now include concise help text throughout the client, server and peer editors.
+- **Active per-client health monitoring** verifies the real AWG data plane with ICMP probes instead of treating an existing interface as proof of connectivity.
+- **Gateway Health Sync** feeds debounced tunnel health into the native OPNsense gateway **Force Down** state, allowing Gateway Groups and policy routing to fail over without `dpinger`.
+- After three consecutive failed probes the affected gateway is forced down; the optional watchdog can restart only that client with a 10-minute per-client cooldown, and the next successful probe restores the gateway.
+- The 2.1.1 route-recovery fix is included: after an `awgN` interface is recreated, health can ask OPNsense to reconcile the native gateway host route before probing. The plugin still does not take permanent ownership of that route.
+- The interface has been polished throughout: clearer aggregate status and diagnostics, improved client/server/peer actions and provisioning, structured service/watchdog log views, and clearer help text across configuration fields.
 
-No AmneziaWG configuration migration is required from 2.1.1.
+Existing 2.1.1 client/server configuration, keys, gateways and health settings are preserved.
 
-See [RELEASE_NOTES.md](RELEASE_NOTES.md) and [Changelog.md](Changelog.md) for the release summary.
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) and [Changelog.md](Changelog.md) for the detailed release history.
 
 ## Upstream and attribution
 

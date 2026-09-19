@@ -137,26 +137,8 @@
                                 default:
                                     return '<span class="label label-default">?</span>';
                             }
-                        },
-                        'healthstatus': function (column, row) {
-                            switch (row.health_runtime) {
-                                case 'online':
-                                    return '<span class="label label-success">{{ lang._('online') }}</span>';
-                                case 'offline':
-                                    var failures = parseInt(row.health_failures || 0, 10);
-                                    var suffix = failures > 0 && failures < 3 ? ' ' + failures + '/3' : '';
-                                    return '<span class="label label-danger">{{ lang._('offline') }}' + suffix + '</span>';
-                                case 'stale':
-                                    return '<span class="label label-warning">{{ lang._('stale') }}</span>';
-                                case 'waiting':
-                                    return '<span class="label label-info">{{ lang._('waiting') }}</span>';
-                                case 'stopped':
-                                    return '<span class="label label-default">{{ lang._('stopped') }}</span>';
-                                case 'disabled':
-                                    return '<span class="label label-default">{{ lang._('disabled') }}</span>';
-                                default:
-                                    return '<span class="label label-default">?</span>';
-                            }
+                        }
+
                         }
                     }
                 }
@@ -565,6 +547,26 @@
                     .addClass(running ? 'label-success' : 'label-danger')
                     .text(label);
 
+                var health = data.health || {};
+                var healthState = health.state || 'waiting';
+                var healthClass = healthState === 'online' ? 'label-success'
+                    : (healthState === 'offline' ? 'label-danger'
+                    : (healthState === 'disabled' || healthState === 'stopped' ? 'label-default'
+                    : 'label-warning'));
+                var healthTitle = '';
+                if (Array.isArray(health.clients)) {
+                    healthTitle = health.clients.map(function (h) {
+                        var suffix = (h.state === 'offline' && h.failures > 0 && h.failures < 3)
+                            ? ' ' + h.failures + '/3' : '';
+                        return h.name + ': ' + h.state + suffix;
+                    }).join('; ');
+                }
+                $('#badge_health')
+                    .removeClass('label-success label-danger label-warning label-default')
+                    .addClass(healthClass)
+                    .attr('title', healthTitle)
+                    .text(health.label || 'health: waiting');
+
                 if (!_statusPaused) {
                     $('#btnStart').prop('disabled', running);
                     $('#btnStop').prop('disabled', !running);
@@ -573,15 +575,6 @@
         }
         updateStatus();
         _statusTimer = setInterval(updateStatus, 10000);
-
-        // Health probes run once per minute. Refresh only the client grid at a
-        // lower cadence so the Health column follows probe results without
-        // adding configd load to the 10-second service-status poll.
-        var _clientGridTimer = setInterval(function () {
-            if (!_statusPaused && $('#{{formGridInstance['table_id']}}').is(':visible')) {
-                $('#{{formGridInstance['table_id']}}').bootgrid('reload');
-            }
-        }, 30000);
 
         // ── Start / Stop / Restart (service level: all tunnels) ───────
         function serviceAction(action, confirmMsg) {
@@ -852,6 +845,13 @@
                             message: $('<div>').text(data.message || "{{ lang._('Health probe failed') }}").html(),
                             buttons: [{label: "{{ lang._('Close') }}", action: function(d){ d.close(); }}]
                         });
+                    } else if (data.result === 'waiting') {
+                        BootstrapDialog.show({
+                            type: BootstrapDialog.TYPE_INFO,
+                            title: "{{ lang._('Health probe') }}",
+                            message: $('<div>').text(data.message || "{{ lang._('Health probe is waiting for routing') }}").html(),
+                            buttons: [{label: "{{ lang._('Close') }}", action: function(d){ d.close(); }}]
+                        });
                     } else if (data.result !== 'ok') {
                         alert(data.message || "{{ lang._('Health probe failed') }}");
                     }
@@ -994,6 +994,7 @@
     <div id="general" class="tab-pane fade in{% if section == 'general' %} active{% endif %}"{% if section != 'general' %} style="display:none;"{% endif %}>
         <div style="padding: 10px 15px 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;">
             <span id="badge_awg" class="label label-default">awg: ...</span>
+            <span id="badge_health" class="label label-default" title="">health: ...</span>
             <span style="margin-left: 4px; border-left: 1px solid #ddd; padding-left: 8px; display: inline-flex; gap: 4px;">
                 <button id="btnStart" class="btn btn-xs btn-success" title="{{ lang._('Start all enabled tunnels') }}"><i class="fa fa-play"></i> {{ lang._('Start') }}</button>
                 <button id="btnStop" class="btn btn-xs btn-danger" title="{{ lang._('Stop all tunnels') }}"><i class="fa fa-stop"></i> {{ lang._('Stop') }}</button>

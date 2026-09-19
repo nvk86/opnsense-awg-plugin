@@ -296,8 +296,718 @@ postflight(){
     _tools_upstream=${TOOLS_VERSION%%_*}
     /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
     grep -q '\[testconnect\]' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf && die "Obsolete testconnect action is still installed"
-    grep -q '^\[health\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Health action missing after install"
-    grep -q '^\[gateway_sync\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync action missing after install"
+    grep -q '^\[health\]
+    /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php >/dev/null || die "Gateway sync script syntax check failed"
+    grep -Rqs 'if_amn' /usr/local/opnsense/scripts/AmneziaWG /usr/local/etc/rc.syshook.d/start/50-amneziawg && die "Legacy if_amn reference remains in runtime scripts"
+    # A healthy backend can legitimately report either "stopped" (no live
+    # tunnels yet) or "ok".  At this point the installer intentionally stopped
+    # the pre-upgrade interfaces and has not restored them yet, so requiring
+    # only "ok" would make a normal upgrade fail before restoration.
+    _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
+    printf '%s\n' "$_st" | grep -Eq '"status":"(ok|stopped)"' || die "configd status smoke test failed: $_st"
+    _va=$(/usr/local/sbin/configctl amneziawg validate 2>&1 || true)
+    if printf '%s\n' "$_va" | grep -q 'ERROR: no enabled instances to validate'; then
+        log "[OK] No enabled AWG instances configured yet; skipping configuration validation"
+    elif printf '%s\n' "$_va" | grep -Eq '^OK([[:space:]]|$)'; then
+        :
+    else
+        die "configuration validation failed: $_va"
+    fi
+
+    mkdir -p "$(dirname "$VERSION_FILE")"
+    printf '%s\n' "$PLUGIN_VERSION" > "$VERSION_FILE"
+    chmod 0644 "$VERSION_FILE"
+
+    # Restore exactly the interfaces that were live before migration.
+    for _iface in $RUNNING_IFACES; do
+        /usr/local/sbin/configctl amneziawg start_instance "$_iface" >/dev/null 2>&1 || die "Failed to restore previously running $_iface"
+        /sbin/ifconfig "$_iface" >/dev/null 2>&1 || die "Previously running $_iface was not restored"
+    done
+    if [ -n "$RUNNING_IFACES" ]; then
+        _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
+        printf '%s\n' "$_st" | grep -q '"status":"ok"' || die "restored tunnel status check failed: $_st"
+    fi
+
+    # Reconcile any existing 2.1.x ownership registry after files/configd are
+    # restored. Fresh 2.0.x upgrades have no health-sync state, so this is a no-op.
+    /usr/local/sbin/configctl amneziawg gateway_sync reconcile >/dev/null 2>&1 || true
+
+    COMMITTED=1
+    log "[OK] Backend, module, package versions, configuration and previous runtime state validated"
+}
+
+migration_test_postflight(){
+    log "==> Running package/module migration smoke tests..."
+    have_pkg amnezia-tools && die "Legacy amnezia-tools is still installed"
+    have_pkg amnezia-kmod && die "Legacy amnezia-kmod is still installed"
+    [ "$(pkgq query '%v' opnsense-awg-tools 2>/dev/null)" = "$TOOLS_VERSION" ] || die "Wrong opnsense-awg-tools version after migration"
+    [ "$(pkgq query '%v' opnsense-awg-kmod 2>/dev/null)" = "$KMOD_VERSION" ] || die "Wrong opnsense-awg-kmod version after migration"
+    /sbin/kldstat -q -m if_awg >/dev/null 2>&1 || die "if_awg not loaded after migration"
+    ! /sbin/kldstat -q -m if_amn >/dev/null 2>&1 || die "Legacy if_amn is still loaded"
+    verify_loader_entries
+    _tools_upstream=${TOOLS_VERSION%%_*}
+    /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
+    pkgq which /usr/local/bin/awg 2>/dev/null | grep -q 'opnsense-awg-tools-' || die "awg is not owned by opnsense-awg-tools"
+    pkgq which /boot/modules/if_awg.ko 2>/dev/null | grep -q 'opnsense-awg-kmod-' || die "if_awg.ko is not owned by opnsense-awg-kmod"
+
+    _smoke=awg98
+    if ifconfig "$_smoke" >/dev/null 2>&1; then die "Smoke-test interface $_smoke already exists"; fi
+    _created=0
+    if ifconfig awg create name "$_smoke" >/dev/null 2>&1; then _created=1; else die "if_awg cloner smoke test failed"; fi
+    /usr/local/bin/awg show interfaces 2>/dev/null | tr ' ' '\n' | grep -qx "$_smoke" || {
+        [ "$_created" -eq 1 ] && ifconfig "$_smoke" destroy >/dev/null 2>&1 || true
+        die "awg userspace cannot see $_smoke"
+    }
+    /usr/local/bin/awg set "$_smoke" h1 1 h2 2 h3 3 h4 4 >/dev/null 2>&1 || {
+        ifconfig "$_smoke" destroy >/dev/null 2>&1 || true
+        die "AWG default magic-header compatibility smoke test failed"
+    }
+    ifconfig "$_smoke" destroy >/dev/null 2>&1 || die "Could not destroy $_smoke after smoke test"
+
+    COMMITTED=1
+    log "[OK] Legacy packages removed, project packages installed, if_awg loaded, ownership and cloner ABI verified"
+}
+
+restore_rootfs(){
+    if [ "$MIGRATION_TEST" -eq 0 ]; then remove_plugin_files; fi
+    if [ -d "$TXN_DIR/rootfs" ]; then (cd "$TXN_DIR/rootfs" && tar -cf - .) | (cd / && tar -xpf -) || true; fi
+    if [ "$MIGRATION_TEST" -eq 0 ] && [ -f "$TXN_DIR/config.xml" ]; then cp -p "$TXN_DIR/config.xml" /conf/config.xml; fi
+    if [ -f "$TXN_DIR/loader.conf" ]; then cp -p "$TXN_DIR/loader.conf" /boot/loader.conf; fi
+    if [ -f "$TXN_DIR/loader.conf.local" ]; then cp -p "$TXN_DIR/loader.conf.local" /boot/loader.conf.local; fi
+    if [ -d "$TXN_DIR/amnezia" ]; then rm -rf /usr/local/etc/amnezia; cp -Rp "$TXN_DIR/amnezia" /usr/local/etc/amnezia; fi
+}
+
+rollback(){
+    [ "$MUTATED" -eq 1 ] || return 0
+    warn "Installation failed; rolling back the previous AWG stack and plugin."
+    if [ "$MIGRATION_TEST" -eq 0 ] && [ -x /usr/local/sbin/configctl ]; then /usr/local/sbin/configctl amneziawg stop >/dev/null 2>&1 || true; fi
+    if [ -x /usr/local/bin/awg ]; then
+        for _i in $(/usr/local/bin/awg show interfaces 2>/dev/null || true); do /usr/local/bin/awg-quick down "$_i" >/dev/null 2>&1 || ifconfig "$_i" destroy >/dev/null 2>&1 || true; done
+    fi
+    /sbin/kldunload if_awg >/dev/null 2>&1 || true
+    for _pkg in opnsense-awg-tools opnsense-awg-kmod amnezia-tools amnezia-kmod; do
+        if have_pkg "$_pkg"; then pkgq unlock -qy "$_pkg" >/dev/null 2>&1 || true; pkgq delete -y "$_pkg" >/dev/null 2>&1 || true; fi
+    done
+    if [ -d "$TXN_DIR/packages" ]; then
+        for _f in "$TXN_DIR"/packages/*.pkg; do [ -f "$_f" ] || continue; pkgq add "$_f" >/dev/null 2>&1 || warn "Could not restore package $_f"; done
+    fi
+    restore_rootfs
+    if [ "$OLD_IF_AMN" -eq 1 ]; then /sbin/kldload if_amn >/dev/null 2>&1 || warn "Could not reload legacy if_amn"; fi
+    if [ "$OLD_IF_AWG" -eq 1 ]; then /sbin/kldload /boot/modules/if_awg.ko >/dev/null 2>&1 || warn "Could not reload previous if_awg"; fi
+    if [ "$MIGRATION_TEST" -eq 0 ]; then
+        service configd restart >/dev/null 2>&1 || true
+        for _iface in $RUNNING_IFACES; do /usr/local/sbin/configctl amneziawg start_instance "$_iface" >/dev/null 2>&1 || true; done
+    fi
+    warn "Rollback completed. Recovery directory retained: $TXN_DIR"
+}
+
+on_exit(){
+    _rc=$?
+    trap - EXIT HUP INT TERM
+    if [ "$_rc" -ne 0 ] && [ "$COMMITTED" -ne 1 ]; then rollback; fi
+    if [ "$_rc" -eq 0 ] && [ "$COMMITTED" -eq 1 ] && [ -n "$TXN_DIR" ]; then rm -rf "$TXN_DIR"; fi
+    exit "$_rc"
+}
+
+uninstall(){
+    need_root; choose_pkg
+    # Restore original Force Down values before removing the sync backend.
+    if [ -f /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php ]; then
+        /usr/local/bin/php /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php release_all >/dev/null 2>&1 || true
+    fi
+    if [ -x /usr/local/sbin/configctl ]; then /usr/local/sbin/configctl amneziawg stop >/dev/null 2>&1 || true; fi
+    rm -f /var/run/amneziawg-health-*.json
+    remove_plugin_files
+    rm -f /var/lib/php/tmp/opnsense_menu_cache.xml
+    service configd restart >/dev/null 2>&1 || true
+    log "opnsense-awg plugin removed. AWG packages and /usr/local/etc/amnezia were intentionally kept."
+    exit 0
+}
+
+case "${1:-}" in
+    --uninstall) uninstall ;;
+    --migration-test) MIGRATION_TEST=1 ;;
+    --migration-test-fail) MIGRATION_TEST=1; FORCE_TEST_FAILURE=1 ;;
+    "") ;;
+    *) die "Usage: $0 [--uninstall|--migration-test|--migration-test-fail]" ;;
+esac
+
+need_root
+choose_pkg
+check_platform
+if [ "$MIGRATION_TEST" -eq 0 ]; then
+    [ -d "$PLUGIN_DIR" ] || die "plugin/ directory is missing next to install.sh"
+else
+    have_pkg amnezia-tools || die "--migration-test requires legacy amnezia-tools to be installed first"
+    have_pkg amnezia-kmod || die "--migration-test requires legacy amnezia-kmod to be installed first"
+fi
+TXN_DIR=$(mktemp -d /tmp/opnsense-awg-v2.XXXXXX)
+trap on_exit EXIT HUP INT TERM
+
+log "============================================================"
+if [ "$MIGRATION_TEST" -eq 1 ]; then
+    log " opnsense-awg AWG2 -> AWG3 PACKAGE MIGRATION TEST"
+else
+    log " opnsense-awg v$PLUGIN_VERSION / AWG latest compatible 3.x"
+fi
+log "============================================================"
+
+read_state
+resolve_packages
+backup_file_tree
+backup_packages
+download_packages
+stop_runtime
+migrate_packages
+if [ "$MIGRATION_TEST" -eq 1 ]; then
+    [ "$FORCE_TEST_FAILURE" -eq 0 ] || die "Forced failure after package migration (rollback test)"
+    migration_test_postflight
+    log ""
+    log "AWG package migration test completed successfully."
+    log "Legacy amnezia-tools/amnezia-kmod were replaced by the project-owned AWG 3.1 packages."
+else
+    install_plugin
+    run_migrations
+    postflight
+    log ""
+    log "opnsense-awg v$PLUGIN_VERSION installed successfully."
+    log "Legacy amnezia-tools/amnezia-kmod have been replaced by the project-owned AWG 3.1 packages."
+fi
+ /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Health action missing after install"
+    grep -q '^\[gateway_sync\]
+    /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php >/dev/null || die "Gateway sync script syntax check failed"
+    grep -Rqs 'if_amn' /usr/local/opnsense/scripts/AmneziaWG /usr/local/etc/rc.syshook.d/start/50-amneziawg && die "Legacy if_amn reference remains in runtime scripts"
+    # A healthy backend can legitimately report either "stopped" (no live
+    # tunnels yet) or "ok".  At this point the installer intentionally stopped
+    # the pre-upgrade interfaces and has not restored them yet, so requiring
+    # only "ok" would make a normal upgrade fail before restoration.
+    _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
+    printf '%s\n' "$_st" | grep -Eq '"status":"(ok|stopped)"' || die "configd status smoke test failed: $_st"
+    _va=$(/usr/local/sbin/configctl amneziawg validate 2>&1 || true)
+    if printf '%s\n' "$_va" | grep -q 'ERROR: no enabled instances to validate'; then
+        log "[OK] No enabled AWG instances configured yet; skipping configuration validation"
+    elif printf '%s\n' "$_va" | grep -Eq '^OK([[:space:]]|$)'; then
+        :
+    else
+        die "configuration validation failed: $_va"
+    fi
+
+    mkdir -p "$(dirname "$VERSION_FILE")"
+    printf '%s\n' "$PLUGIN_VERSION" > "$VERSION_FILE"
+    chmod 0644 "$VERSION_FILE"
+
+    # Restore exactly the interfaces that were live before migration.
+    for _iface in $RUNNING_IFACES; do
+        /usr/local/sbin/configctl amneziawg start_instance "$_iface" >/dev/null 2>&1 || die "Failed to restore previously running $_iface"
+        /sbin/ifconfig "$_iface" >/dev/null 2>&1 || die "Previously running $_iface was not restored"
+    done
+    if [ -n "$RUNNING_IFACES" ]; then
+        _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
+        printf '%s\n' "$_st" | grep -q '"status":"ok"' || die "restored tunnel status check failed: $_st"
+    fi
+
+    # Reconcile any existing 2.1.x ownership registry after files/configd are
+    # restored. Fresh 2.0.x upgrades have no health-sync state, so this is a no-op.
+    /usr/local/sbin/configctl amneziawg gateway_sync reconcile >/dev/null 2>&1 || true
+
+    COMMITTED=1
+    log "[OK] Backend, module, package versions, configuration and previous runtime state validated"
+}
+
+migration_test_postflight(){
+    log "==> Running package/module migration smoke tests..."
+    have_pkg amnezia-tools && die "Legacy amnezia-tools is still installed"
+    have_pkg amnezia-kmod && die "Legacy amnezia-kmod is still installed"
+    [ "$(pkgq query '%v' opnsense-awg-tools 2>/dev/null)" = "$TOOLS_VERSION" ] || die "Wrong opnsense-awg-tools version after migration"
+    [ "$(pkgq query '%v' opnsense-awg-kmod 2>/dev/null)" = "$KMOD_VERSION" ] || die "Wrong opnsense-awg-kmod version after migration"
+    /sbin/kldstat -q -m if_awg >/dev/null 2>&1 || die "if_awg not loaded after migration"
+    ! /sbin/kldstat -q -m if_amn >/dev/null 2>&1 || die "Legacy if_amn is still loaded"
+    verify_loader_entries
+    _tools_upstream=${TOOLS_VERSION%%_*}
+    /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
+    pkgq which /usr/local/bin/awg 2>/dev/null | grep -q 'opnsense-awg-tools-' || die "awg is not owned by opnsense-awg-tools"
+    pkgq which /boot/modules/if_awg.ko 2>/dev/null | grep -q 'opnsense-awg-kmod-' || die "if_awg.ko is not owned by opnsense-awg-kmod"
+
+    _smoke=awg98
+    if ifconfig "$_smoke" >/dev/null 2>&1; then die "Smoke-test interface $_smoke already exists"; fi
+    _created=0
+    if ifconfig awg create name "$_smoke" >/dev/null 2>&1; then _created=1; else die "if_awg cloner smoke test failed"; fi
+    /usr/local/bin/awg show interfaces 2>/dev/null | tr ' ' '\n' | grep -qx "$_smoke" || {
+        [ "$_created" -eq 1 ] && ifconfig "$_smoke" destroy >/dev/null 2>&1 || true
+        die "awg userspace cannot see $_smoke"
+    }
+    /usr/local/bin/awg set "$_smoke" h1 1 h2 2 h3 3 h4 4 >/dev/null 2>&1 || {
+        ifconfig "$_smoke" destroy >/dev/null 2>&1 || true
+        die "AWG default magic-header compatibility smoke test failed"
+    }
+    ifconfig "$_smoke" destroy >/dev/null 2>&1 || die "Could not destroy $_smoke after smoke test"
+
+    COMMITTED=1
+    log "[OK] Legacy packages removed, project packages installed, if_awg loaded, ownership and cloner ABI verified"
+}
+
+restore_rootfs(){
+    if [ "$MIGRATION_TEST" -eq 0 ]; then remove_plugin_files; fi
+    if [ -d "$TXN_DIR/rootfs" ]; then (cd "$TXN_DIR/rootfs" && tar -cf - .) | (cd / && tar -xpf -) || true; fi
+    if [ "$MIGRATION_TEST" -eq 0 ] && [ -f "$TXN_DIR/config.xml" ]; then cp -p "$TXN_DIR/config.xml" /conf/config.xml; fi
+    if [ -f "$TXN_DIR/loader.conf" ]; then cp -p "$TXN_DIR/loader.conf" /boot/loader.conf; fi
+    if [ -f "$TXN_DIR/loader.conf.local" ]; then cp -p "$TXN_DIR/loader.conf.local" /boot/loader.conf.local; fi
+    if [ -d "$TXN_DIR/amnezia" ]; then rm -rf /usr/local/etc/amnezia; cp -Rp "$TXN_DIR/amnezia" /usr/local/etc/amnezia; fi
+}
+
+rollback(){
+    [ "$MUTATED" -eq 1 ] || return 0
+    warn "Installation failed; rolling back the previous AWG stack and plugin."
+    if [ "$MIGRATION_TEST" -eq 0 ] && [ -x /usr/local/sbin/configctl ]; then /usr/local/sbin/configctl amneziawg stop >/dev/null 2>&1 || true; fi
+    if [ -x /usr/local/bin/awg ]; then
+        for _i in $(/usr/local/bin/awg show interfaces 2>/dev/null || true); do /usr/local/bin/awg-quick down "$_i" >/dev/null 2>&1 || ifconfig "$_i" destroy >/dev/null 2>&1 || true; done
+    fi
+    /sbin/kldunload if_awg >/dev/null 2>&1 || true
+    for _pkg in opnsense-awg-tools opnsense-awg-kmod amnezia-tools amnezia-kmod; do
+        if have_pkg "$_pkg"; then pkgq unlock -qy "$_pkg" >/dev/null 2>&1 || true; pkgq delete -y "$_pkg" >/dev/null 2>&1 || true; fi
+    done
+    if [ -d "$TXN_DIR/packages" ]; then
+        for _f in "$TXN_DIR"/packages/*.pkg; do [ -f "$_f" ] || continue; pkgq add "$_f" >/dev/null 2>&1 || warn "Could not restore package $_f"; done
+    fi
+    restore_rootfs
+    if [ "$OLD_IF_AMN" -eq 1 ]; then /sbin/kldload if_amn >/dev/null 2>&1 || warn "Could not reload legacy if_amn"; fi
+    if [ "$OLD_IF_AWG" -eq 1 ]; then /sbin/kldload /boot/modules/if_awg.ko >/dev/null 2>&1 || warn "Could not reload previous if_awg"; fi
+    if [ "$MIGRATION_TEST" -eq 0 ]; then
+        service configd restart >/dev/null 2>&1 || true
+        for _iface in $RUNNING_IFACES; do /usr/local/sbin/configctl amneziawg start_instance "$_iface" >/dev/null 2>&1 || true; done
+    fi
+    warn "Rollback completed. Recovery directory retained: $TXN_DIR"
+}
+
+on_exit(){
+    _rc=$?
+    trap - EXIT HUP INT TERM
+    if [ "$_rc" -ne 0 ] && [ "$COMMITTED" -ne 1 ]; then rollback; fi
+    if [ "$_rc" -eq 0 ] && [ "$COMMITTED" -eq 1 ] && [ -n "$TXN_DIR" ]; then rm -rf "$TXN_DIR"; fi
+    exit "$_rc"
+}
+
+uninstall(){
+    need_root; choose_pkg
+    # Restore original Force Down values before removing the sync backend.
+    if [ -f /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php ]; then
+        /usr/local/bin/php /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php release_all >/dev/null 2>&1 || true
+    fi
+    if [ -x /usr/local/sbin/configctl ]; then /usr/local/sbin/configctl amneziawg stop >/dev/null 2>&1 || true; fi
+    rm -f /var/run/amneziawg-health-*.json
+    remove_plugin_files
+    rm -f /var/lib/php/tmp/opnsense_menu_cache.xml
+    service configd restart >/dev/null 2>&1 || true
+    log "opnsense-awg plugin removed. AWG packages and /usr/local/etc/amnezia were intentionally kept."
+    exit 0
+}
+
+case "${1:-}" in
+    --uninstall) uninstall ;;
+    --migration-test) MIGRATION_TEST=1 ;;
+    --migration-test-fail) MIGRATION_TEST=1; FORCE_TEST_FAILURE=1 ;;
+    "") ;;
+    *) die "Usage: $0 [--uninstall|--migration-test|--migration-test-fail]" ;;
+esac
+
+need_root
+choose_pkg
+check_platform
+if [ "$MIGRATION_TEST" -eq 0 ]; then
+    [ -d "$PLUGIN_DIR" ] || die "plugin/ directory is missing next to install.sh"
+else
+    have_pkg amnezia-tools || die "--migration-test requires legacy amnezia-tools to be installed first"
+    have_pkg amnezia-kmod || die "--migration-test requires legacy amnezia-kmod to be installed first"
+fi
+TXN_DIR=$(mktemp -d /tmp/opnsense-awg-v2.XXXXXX)
+trap on_exit EXIT HUP INT TERM
+
+log "============================================================"
+if [ "$MIGRATION_TEST" -eq 1 ]; then
+    log " opnsense-awg AWG2 -> AWG3 PACKAGE MIGRATION TEST"
+else
+    log " opnsense-awg v$PLUGIN_VERSION / AWG latest compatible 3.x"
+fi
+log "============================================================"
+
+read_state
+resolve_packages
+backup_file_tree
+backup_packages
+download_packages
+stop_runtime
+migrate_packages
+if [ "$MIGRATION_TEST" -eq 1 ]; then
+    [ "$FORCE_TEST_FAILURE" -eq 0 ] || die "Forced failure after package migration (rollback test)"
+    migration_test_postflight
+    log ""
+    log "AWG package migration test completed successfully."
+    log "Legacy amnezia-tools/amnezia-kmod were replaced by the project-owned AWG 3.1 packages."
+else
+    install_plugin
+    run_migrations
+    postflight
+    log ""
+    log "opnsense-awg v$PLUGIN_VERSION installed successfully."
+    log "Legacy amnezia-tools/amnezia-kmod have been replaced by the project-owned AWG 3.1 packages."
+fi
+ /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync action missing after install"
+    grep -q '^\[gateway_sync_state\]
+    /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php >/dev/null || die "Gateway sync script syntax check failed"
+    grep -Rqs 'if_amn' /usr/local/opnsense/scripts/AmneziaWG /usr/local/etc/rc.syshook.d/start/50-amneziawg && die "Legacy if_amn reference remains in runtime scripts"
+    # A healthy backend can legitimately report either "stopped" (no live
+    # tunnels yet) or "ok".  At this point the installer intentionally stopped
+    # the pre-upgrade interfaces and has not restored them yet, so requiring
+    # only "ok" would make a normal upgrade fail before restoration.
+    _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
+    printf '%s\n' "$_st" | grep -Eq '"status":"(ok|stopped)"' || die "configd status smoke test failed: $_st"
+    _va=$(/usr/local/sbin/configctl amneziawg validate 2>&1 || true)
+    if printf '%s\n' "$_va" | grep -q 'ERROR: no enabled instances to validate'; then
+        log "[OK] No enabled AWG instances configured yet; skipping configuration validation"
+    elif printf '%s\n' "$_va" | grep -Eq '^OK([[:space:]]|$)'; then
+        :
+    else
+        die "configuration validation failed: $_va"
+    fi
+
+    mkdir -p "$(dirname "$VERSION_FILE")"
+    printf '%s\n' "$PLUGIN_VERSION" > "$VERSION_FILE"
+    chmod 0644 "$VERSION_FILE"
+
+    # Restore exactly the interfaces that were live before migration.
+    for _iface in $RUNNING_IFACES; do
+        /usr/local/sbin/configctl amneziawg start_instance "$_iface" >/dev/null 2>&1 || die "Failed to restore previously running $_iface"
+        /sbin/ifconfig "$_iface" >/dev/null 2>&1 || die "Previously running $_iface was not restored"
+    done
+    if [ -n "$RUNNING_IFACES" ]; then
+        _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
+        printf '%s\n' "$_st" | grep -q '"status":"ok"' || die "restored tunnel status check failed: $_st"
+    fi
+
+    # Reconcile any existing 2.1.x ownership registry after files/configd are
+    # restored. Fresh 2.0.x upgrades have no health-sync state, so this is a no-op.
+    /usr/local/sbin/configctl amneziawg gateway_sync reconcile >/dev/null 2>&1 || true
+
+    COMMITTED=1
+    log "[OK] Backend, module, package versions, configuration and previous runtime state validated"
+}
+
+migration_test_postflight(){
+    log "==> Running package/module migration smoke tests..."
+    have_pkg amnezia-tools && die "Legacy amnezia-tools is still installed"
+    have_pkg amnezia-kmod && die "Legacy amnezia-kmod is still installed"
+    [ "$(pkgq query '%v' opnsense-awg-tools 2>/dev/null)" = "$TOOLS_VERSION" ] || die "Wrong opnsense-awg-tools version after migration"
+    [ "$(pkgq query '%v' opnsense-awg-kmod 2>/dev/null)" = "$KMOD_VERSION" ] || die "Wrong opnsense-awg-kmod version after migration"
+    /sbin/kldstat -q -m if_awg >/dev/null 2>&1 || die "if_awg not loaded after migration"
+    ! /sbin/kldstat -q -m if_amn >/dev/null 2>&1 || die "Legacy if_amn is still loaded"
+    verify_loader_entries
+    _tools_upstream=${TOOLS_VERSION%%_*}
+    /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
+    pkgq which /usr/local/bin/awg 2>/dev/null | grep -q 'opnsense-awg-tools-' || die "awg is not owned by opnsense-awg-tools"
+    pkgq which /boot/modules/if_awg.ko 2>/dev/null | grep -q 'opnsense-awg-kmod-' || die "if_awg.ko is not owned by opnsense-awg-kmod"
+
+    _smoke=awg98
+    if ifconfig "$_smoke" >/dev/null 2>&1; then die "Smoke-test interface $_smoke already exists"; fi
+    _created=0
+    if ifconfig awg create name "$_smoke" >/dev/null 2>&1; then _created=1; else die "if_awg cloner smoke test failed"; fi
+    /usr/local/bin/awg show interfaces 2>/dev/null | tr ' ' '\n' | grep -qx "$_smoke" || {
+        [ "$_created" -eq 1 ] && ifconfig "$_smoke" destroy >/dev/null 2>&1 || true
+        die "awg userspace cannot see $_smoke"
+    }
+    /usr/local/bin/awg set "$_smoke" h1 1 h2 2 h3 3 h4 4 >/dev/null 2>&1 || {
+        ifconfig "$_smoke" destroy >/dev/null 2>&1 || true
+        die "AWG default magic-header compatibility smoke test failed"
+    }
+    ifconfig "$_smoke" destroy >/dev/null 2>&1 || die "Could not destroy $_smoke after smoke test"
+
+    COMMITTED=1
+    log "[OK] Legacy packages removed, project packages installed, if_awg loaded, ownership and cloner ABI verified"
+}
+
+restore_rootfs(){
+    if [ "$MIGRATION_TEST" -eq 0 ]; then remove_plugin_files; fi
+    if [ -d "$TXN_DIR/rootfs" ]; then (cd "$TXN_DIR/rootfs" && tar -cf - .) | (cd / && tar -xpf -) || true; fi
+    if [ "$MIGRATION_TEST" -eq 0 ] && [ -f "$TXN_DIR/config.xml" ]; then cp -p "$TXN_DIR/config.xml" /conf/config.xml; fi
+    if [ -f "$TXN_DIR/loader.conf" ]; then cp -p "$TXN_DIR/loader.conf" /boot/loader.conf; fi
+    if [ -f "$TXN_DIR/loader.conf.local" ]; then cp -p "$TXN_DIR/loader.conf.local" /boot/loader.conf.local; fi
+    if [ -d "$TXN_DIR/amnezia" ]; then rm -rf /usr/local/etc/amnezia; cp -Rp "$TXN_DIR/amnezia" /usr/local/etc/amnezia; fi
+}
+
+rollback(){
+    [ "$MUTATED" -eq 1 ] || return 0
+    warn "Installation failed; rolling back the previous AWG stack and plugin."
+    if [ "$MIGRATION_TEST" -eq 0 ] && [ -x /usr/local/sbin/configctl ]; then /usr/local/sbin/configctl amneziawg stop >/dev/null 2>&1 || true; fi
+    if [ -x /usr/local/bin/awg ]; then
+        for _i in $(/usr/local/bin/awg show interfaces 2>/dev/null || true); do /usr/local/bin/awg-quick down "$_i" >/dev/null 2>&1 || ifconfig "$_i" destroy >/dev/null 2>&1 || true; done
+    fi
+    /sbin/kldunload if_awg >/dev/null 2>&1 || true
+    for _pkg in opnsense-awg-tools opnsense-awg-kmod amnezia-tools amnezia-kmod; do
+        if have_pkg "$_pkg"; then pkgq unlock -qy "$_pkg" >/dev/null 2>&1 || true; pkgq delete -y "$_pkg" >/dev/null 2>&1 || true; fi
+    done
+    if [ -d "$TXN_DIR/packages" ]; then
+        for _f in "$TXN_DIR"/packages/*.pkg; do [ -f "$_f" ] || continue; pkgq add "$_f" >/dev/null 2>&1 || warn "Could not restore package $_f"; done
+    fi
+    restore_rootfs
+    if [ "$OLD_IF_AMN" -eq 1 ]; then /sbin/kldload if_amn >/dev/null 2>&1 || warn "Could not reload legacy if_amn"; fi
+    if [ "$OLD_IF_AWG" -eq 1 ]; then /sbin/kldload /boot/modules/if_awg.ko >/dev/null 2>&1 || warn "Could not reload previous if_awg"; fi
+    if [ "$MIGRATION_TEST" -eq 0 ]; then
+        service configd restart >/dev/null 2>&1 || true
+        for _iface in $RUNNING_IFACES; do /usr/local/sbin/configctl amneziawg start_instance "$_iface" >/dev/null 2>&1 || true; done
+    fi
+    warn "Rollback completed. Recovery directory retained: $TXN_DIR"
+}
+
+on_exit(){
+    _rc=$?
+    trap - EXIT HUP INT TERM
+    if [ "$_rc" -ne 0 ] && [ "$COMMITTED" -ne 1 ]; then rollback; fi
+    if [ "$_rc" -eq 0 ] && [ "$COMMITTED" -eq 1 ] && [ -n "$TXN_DIR" ]; then rm -rf "$TXN_DIR"; fi
+    exit "$_rc"
+}
+
+uninstall(){
+    need_root; choose_pkg
+    # Restore original Force Down values before removing the sync backend.
+    if [ -f /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php ]; then
+        /usr/local/bin/php /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php release_all >/dev/null 2>&1 || true
+    fi
+    if [ -x /usr/local/sbin/configctl ]; then /usr/local/sbin/configctl amneziawg stop >/dev/null 2>&1 || true; fi
+    rm -f /var/run/amneziawg-health-*.json
+    remove_plugin_files
+    rm -f /var/lib/php/tmp/opnsense_menu_cache.xml
+    service configd restart >/dev/null 2>&1 || true
+    log "opnsense-awg plugin removed. AWG packages and /usr/local/etc/amnezia were intentionally kept."
+    exit 0
+}
+
+case "${1:-}" in
+    --uninstall) uninstall ;;
+    --migration-test) MIGRATION_TEST=1 ;;
+    --migration-test-fail) MIGRATION_TEST=1; FORCE_TEST_FAILURE=1 ;;
+    "") ;;
+    *) die "Usage: $0 [--uninstall|--migration-test|--migration-test-fail]" ;;
+esac
+
+need_root
+choose_pkg
+check_platform
+if [ "$MIGRATION_TEST" -eq 0 ]; then
+    [ -d "$PLUGIN_DIR" ] || die "plugin/ directory is missing next to install.sh"
+else
+    have_pkg amnezia-tools || die "--migration-test requires legacy amnezia-tools to be installed first"
+    have_pkg amnezia-kmod || die "--migration-test requires legacy amnezia-kmod to be installed first"
+fi
+TXN_DIR=$(mktemp -d /tmp/opnsense-awg-v2.XXXXXX)
+trap on_exit EXIT HUP INT TERM
+
+log "============================================================"
+if [ "$MIGRATION_TEST" -eq 1 ]; then
+    log " opnsense-awg AWG2 -> AWG3 PACKAGE MIGRATION TEST"
+else
+    log " opnsense-awg v$PLUGIN_VERSION / AWG latest compatible 3.x"
+fi
+log "============================================================"
+
+read_state
+resolve_packages
+backup_file_tree
+backup_packages
+download_packages
+stop_runtime
+migrate_packages
+if [ "$MIGRATION_TEST" -eq 1 ]; then
+    [ "$FORCE_TEST_FAILURE" -eq 0 ] || die "Forced failure after package migration (rollback test)"
+    migration_test_postflight
+    log ""
+    log "AWG package migration test completed successfully."
+    log "Legacy amnezia-tools/amnezia-kmod were replaced by the project-owned AWG 3.1 packages."
+else
+    install_plugin
+    run_migrations
+    postflight
+    log ""
+    log "opnsense-awg v$PLUGIN_VERSION installed successfully."
+    log "Legacy amnezia-tools/amnezia-kmod have been replaced by the project-owned AWG 3.1 packages."
+fi
+ /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync state action missing after install"
+    grep -q '^\[gateway_sync_release\]
+    /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php >/dev/null || die "Gateway sync script syntax check failed"
+    grep -Rqs 'if_amn' /usr/local/opnsense/scripts/AmneziaWG /usr/local/etc/rc.syshook.d/start/50-amneziawg && die "Legacy if_amn reference remains in runtime scripts"
+    # A healthy backend can legitimately report either "stopped" (no live
+    # tunnels yet) or "ok".  At this point the installer intentionally stopped
+    # the pre-upgrade interfaces and has not restored them yet, so requiring
+    # only "ok" would make a normal upgrade fail before restoration.
+    _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
+    printf '%s\n' "$_st" | grep -Eq '"status":"(ok|stopped)"' || die "configd status smoke test failed: $_st"
+    _va=$(/usr/local/sbin/configctl amneziawg validate 2>&1 || true)
+    if printf '%s\n' "$_va" | grep -q 'ERROR: no enabled instances to validate'; then
+        log "[OK] No enabled AWG instances configured yet; skipping configuration validation"
+    elif printf '%s\n' "$_va" | grep -Eq '^OK([[:space:]]|$)'; then
+        :
+    else
+        die "configuration validation failed: $_va"
+    fi
+
+    mkdir -p "$(dirname "$VERSION_FILE")"
+    printf '%s\n' "$PLUGIN_VERSION" > "$VERSION_FILE"
+    chmod 0644 "$VERSION_FILE"
+
+    # Restore exactly the interfaces that were live before migration.
+    for _iface in $RUNNING_IFACES; do
+        /usr/local/sbin/configctl amneziawg start_instance "$_iface" >/dev/null 2>&1 || die "Failed to restore previously running $_iface"
+        /sbin/ifconfig "$_iface" >/dev/null 2>&1 || die "Previously running $_iface was not restored"
+    done
+    if [ -n "$RUNNING_IFACES" ]; then
+        _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
+        printf '%s\n' "$_st" | grep -q '"status":"ok"' || die "restored tunnel status check failed: $_st"
+    fi
+
+    # Reconcile any existing 2.1.x ownership registry after files/configd are
+    # restored. Fresh 2.0.x upgrades have no health-sync state, so this is a no-op.
+    /usr/local/sbin/configctl amneziawg gateway_sync reconcile >/dev/null 2>&1 || true
+
+    COMMITTED=1
+    log "[OK] Backend, module, package versions, configuration and previous runtime state validated"
+}
+
+migration_test_postflight(){
+    log "==> Running package/module migration smoke tests..."
+    have_pkg amnezia-tools && die "Legacy amnezia-tools is still installed"
+    have_pkg amnezia-kmod && die "Legacy amnezia-kmod is still installed"
+    [ "$(pkgq query '%v' opnsense-awg-tools 2>/dev/null)" = "$TOOLS_VERSION" ] || die "Wrong opnsense-awg-tools version after migration"
+    [ "$(pkgq query '%v' opnsense-awg-kmod 2>/dev/null)" = "$KMOD_VERSION" ] || die "Wrong opnsense-awg-kmod version after migration"
+    /sbin/kldstat -q -m if_awg >/dev/null 2>&1 || die "if_awg not loaded after migration"
+    ! /sbin/kldstat -q -m if_amn >/dev/null 2>&1 || die "Legacy if_amn is still loaded"
+    verify_loader_entries
+    _tools_upstream=${TOOLS_VERSION%%_*}
+    /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
+    pkgq which /usr/local/bin/awg 2>/dev/null | grep -q 'opnsense-awg-tools-' || die "awg is not owned by opnsense-awg-tools"
+    pkgq which /boot/modules/if_awg.ko 2>/dev/null | grep -q 'opnsense-awg-kmod-' || die "if_awg.ko is not owned by opnsense-awg-kmod"
+
+    _smoke=awg98
+    if ifconfig "$_smoke" >/dev/null 2>&1; then die "Smoke-test interface $_smoke already exists"; fi
+    _created=0
+    if ifconfig awg create name "$_smoke" >/dev/null 2>&1; then _created=1; else die "if_awg cloner smoke test failed"; fi
+    /usr/local/bin/awg show interfaces 2>/dev/null | tr ' ' '\n' | grep -qx "$_smoke" || {
+        [ "$_created" -eq 1 ] && ifconfig "$_smoke" destroy >/dev/null 2>&1 || true
+        die "awg userspace cannot see $_smoke"
+    }
+    /usr/local/bin/awg set "$_smoke" h1 1 h2 2 h3 3 h4 4 >/dev/null 2>&1 || {
+        ifconfig "$_smoke" destroy >/dev/null 2>&1 || true
+        die "AWG default magic-header compatibility smoke test failed"
+    }
+    ifconfig "$_smoke" destroy >/dev/null 2>&1 || die "Could not destroy $_smoke after smoke test"
+
+    COMMITTED=1
+    log "[OK] Legacy packages removed, project packages installed, if_awg loaded, ownership and cloner ABI verified"
+}
+
+restore_rootfs(){
+    if [ "$MIGRATION_TEST" -eq 0 ]; then remove_plugin_files; fi
+    if [ -d "$TXN_DIR/rootfs" ]; then (cd "$TXN_DIR/rootfs" && tar -cf - .) | (cd / && tar -xpf -) || true; fi
+    if [ "$MIGRATION_TEST" -eq 0 ] && [ -f "$TXN_DIR/config.xml" ]; then cp -p "$TXN_DIR/config.xml" /conf/config.xml; fi
+    if [ -f "$TXN_DIR/loader.conf" ]; then cp -p "$TXN_DIR/loader.conf" /boot/loader.conf; fi
+    if [ -f "$TXN_DIR/loader.conf.local" ]; then cp -p "$TXN_DIR/loader.conf.local" /boot/loader.conf.local; fi
+    if [ -d "$TXN_DIR/amnezia" ]; then rm -rf /usr/local/etc/amnezia; cp -Rp "$TXN_DIR/amnezia" /usr/local/etc/amnezia; fi
+}
+
+rollback(){
+    [ "$MUTATED" -eq 1 ] || return 0
+    warn "Installation failed; rolling back the previous AWG stack and plugin."
+    if [ "$MIGRATION_TEST" -eq 0 ] && [ -x /usr/local/sbin/configctl ]; then /usr/local/sbin/configctl amneziawg stop >/dev/null 2>&1 || true; fi
+    if [ -x /usr/local/bin/awg ]; then
+        for _i in $(/usr/local/bin/awg show interfaces 2>/dev/null || true); do /usr/local/bin/awg-quick down "$_i" >/dev/null 2>&1 || ifconfig "$_i" destroy >/dev/null 2>&1 || true; done
+    fi
+    /sbin/kldunload if_awg >/dev/null 2>&1 || true
+    for _pkg in opnsense-awg-tools opnsense-awg-kmod amnezia-tools amnezia-kmod; do
+        if have_pkg "$_pkg"; then pkgq unlock -qy "$_pkg" >/dev/null 2>&1 || true; pkgq delete -y "$_pkg" >/dev/null 2>&1 || true; fi
+    done
+    if [ -d "$TXN_DIR/packages" ]; then
+        for _f in "$TXN_DIR"/packages/*.pkg; do [ -f "$_f" ] || continue; pkgq add "$_f" >/dev/null 2>&1 || warn "Could not restore package $_f"; done
+    fi
+    restore_rootfs
+    if [ "$OLD_IF_AMN" -eq 1 ]; then /sbin/kldload if_amn >/dev/null 2>&1 || warn "Could not reload legacy if_amn"; fi
+    if [ "$OLD_IF_AWG" -eq 1 ]; then /sbin/kldload /boot/modules/if_awg.ko >/dev/null 2>&1 || warn "Could not reload previous if_awg"; fi
+    if [ "$MIGRATION_TEST" -eq 0 ]; then
+        service configd restart >/dev/null 2>&1 || true
+        for _iface in $RUNNING_IFACES; do /usr/local/sbin/configctl amneziawg start_instance "$_iface" >/dev/null 2>&1 || true; done
+    fi
+    warn "Rollback completed. Recovery directory retained: $TXN_DIR"
+}
+
+on_exit(){
+    _rc=$?
+    trap - EXIT HUP INT TERM
+    if [ "$_rc" -ne 0 ] && [ "$COMMITTED" -ne 1 ]; then rollback; fi
+    if [ "$_rc" -eq 0 ] && [ "$COMMITTED" -eq 1 ] && [ -n "$TXN_DIR" ]; then rm -rf "$TXN_DIR"; fi
+    exit "$_rc"
+}
+
+uninstall(){
+    need_root; choose_pkg
+    # Restore original Force Down values before removing the sync backend.
+    if [ -f /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php ]; then
+        /usr/local/bin/php /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php release_all >/dev/null 2>&1 || true
+    fi
+    if [ -x /usr/local/sbin/configctl ]; then /usr/local/sbin/configctl amneziawg stop >/dev/null 2>&1 || true; fi
+    rm -f /var/run/amneziawg-health-*.json
+    remove_plugin_files
+    rm -f /var/lib/php/tmp/opnsense_menu_cache.xml
+    service configd restart >/dev/null 2>&1 || true
+    log "opnsense-awg plugin removed. AWG packages and /usr/local/etc/amnezia were intentionally kept."
+    exit 0
+}
+
+case "${1:-}" in
+    --uninstall) uninstall ;;
+    --migration-test) MIGRATION_TEST=1 ;;
+    --migration-test-fail) MIGRATION_TEST=1; FORCE_TEST_FAILURE=1 ;;
+    "") ;;
+    *) die "Usage: $0 [--uninstall|--migration-test|--migration-test-fail]" ;;
+esac
+
+need_root
+choose_pkg
+check_platform
+if [ "$MIGRATION_TEST" -eq 0 ]; then
+    [ -d "$PLUGIN_DIR" ] || die "plugin/ directory is missing next to install.sh"
+else
+    have_pkg amnezia-tools || die "--migration-test requires legacy amnezia-tools to be installed first"
+    have_pkg amnezia-kmod || die "--migration-test requires legacy amnezia-kmod to be installed first"
+fi
+TXN_DIR=$(mktemp -d /tmp/opnsense-awg-v2.XXXXXX)
+trap on_exit EXIT HUP INT TERM
+
+log "============================================================"
+if [ "$MIGRATION_TEST" -eq 1 ]; then
+    log " opnsense-awg AWG2 -> AWG3 PACKAGE MIGRATION TEST"
+else
+    log " opnsense-awg v$PLUGIN_VERSION / AWG latest compatible 3.x"
+fi
+log "============================================================"
+
+read_state
+resolve_packages
+backup_file_tree
+backup_packages
+download_packages
+stop_runtime
+migrate_packages
+if [ "$MIGRATION_TEST" -eq 1 ]; then
+    [ "$FORCE_TEST_FAILURE" -eq 0 ] || die "Forced failure after package migration (rollback test)"
+    migration_test_postflight
+    log ""
+    log "AWG package migration test completed successfully."
+    log "Legacy amnezia-tools/amnezia-kmod were replaced by the project-owned AWG 3.1 packages."
+else
+    install_plugin
+    run_migrations
+    postflight
+    log ""
+    log "opnsense-awg v$PLUGIN_VERSION installed successfully."
+    log "Legacy amnezia-tools/amnezia-kmod have been replaced by the project-owned AWG 3.1 packages."
+fi
+ /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync release action missing after install"
     /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-health.php >/dev/null || die "Health script syntax check failed"
     /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php >/dev/null || die "Gateway sync script syntax check failed"
     grep -Rqs 'if_amn' /usr/local/opnsense/scripts/AmneziaWG /usr/local/etc/rc.syshook.d/start/50-amneziawg && die "Legacy if_amn reference remains in runtime scripts"

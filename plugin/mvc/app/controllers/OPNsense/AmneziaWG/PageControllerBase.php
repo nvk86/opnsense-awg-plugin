@@ -27,7 +27,10 @@ abstract class PageControllerBase extends \OPNsense\Base\IndexController
             ['command_width' => '190']
         );
         $this->view->formDialogPeer     = $this->getForm('dialogPeer');
-        $this->view->formGridPeer       = $this->getFormGrid('dialogPeer');
+        $this->view->formGridPeer       = array_merge(
+            $this->getFormGrid('dialogPeer'),
+            ['command_width' => '190']
+        );
         $this->view->pick('OPNsense/AmneziaWG/general');
     }
 }

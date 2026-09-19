@@ -3,7 +3,7 @@
         <id>general.enabled</id>
         <label>Enable AmneziaWG</label>
         <type>checkbox</type>
-        <help>Enable the AmneziaWG VPN service</help>
+        <help>Enable lifecycle management for all configured AmneziaWG client and server instances. Apply starts enabled instances and stops plugin-owned instances when the service is disabled.</help>
     </field>
     <field>
         <id>general.watchdog</id>

@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.2.0 — 2026-09-19
+
+- Unified General status/actions, Server Peer provisioning actions, Diagnostics state presentation and log views.
+- Added complete configuration-field help text across client, server and peer editors.
+- No configuration migration is required from 2.1.1.
+
+
 ## v2.1.1 — 2026-09-19
 
 - Fixed post-install and post-restart health getting stuck in `waiting` when recreating an `awgN` interface removed the native OPNsense gateway host route.

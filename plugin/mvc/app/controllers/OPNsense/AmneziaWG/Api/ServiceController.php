@@ -189,6 +189,7 @@ class ServiceController extends ApiMutableServiceControllerBase
         $hasStale = false;
         $hasStopped = false;
         $monitored = 0;
+        $online = 0;
 
         foreach (($config->OPNsense->amneziawg->instances->instance ?? []) as $inst) {
             if ((string)($inst->enabled ?? '0') !== '1'
@@ -221,6 +222,7 @@ class ServiceController extends ApiMutableServiceControllerBase
                     $hasStale = true;
                 } elseif (!empty($health['online'])) {
                     $state = 'online';
+                    $online++;
                 } else {
                     $state = 'offline';
                     $failures = (int)($health['consecutive_failures'] ?? 0);
@@ -239,24 +241,66 @@ class ServiceController extends ApiMutableServiceControllerBase
         }
 
         if ($monitored === 0) {
-            return ['state'=>'disabled','label'=>'health: disabled','failures'=>0,'monitored'=>0,'clients'=>[]];
+            return ['state'=>'disabled','label'=>'Health: disabled','failures'=>0,'monitored'=>0,'online'=>0,'clients'=>[]];
         }
         if ($hasOffline) {
-            $label = $maxFailures > 0 && $maxFailures < 3
-                ? 'health: offline ' . $maxFailures . '/3'
-                : 'health: offline';
-            return ['state'=>'offline','label'=>$label,'failures'=>$maxFailures,'monitored'=>$monitored,'clients'=>$clients];
+            $label = 'Health: ' . $online . '/' . $monitored . ' online';
+            return ['state'=>'offline','label'=>$label,'failures'=>$maxFailures,'monitored'=>$monitored,'online'=>$online,'clients'=>$clients];
         }
         if ($hasStale) {
-            return ['state'=>'stale','label'=>'health: stale','failures'=>0,'monitored'=>$monitored,'clients'=>$clients];
+            return ['state'=>'stale','label'=>'Health: ' . $online . '/' . $monitored . ' online','failures'=>0,'monitored'=>$monitored,'online'=>$online,'clients'=>$clients];
         }
         if ($hasWaiting) {
-            return ['state'=>'waiting','label'=>'health: waiting','failures'=>0,'monitored'=>$monitored,'clients'=>$clients];
+            return ['state'=>'waiting','label'=>'Health: ' . $online . '/' . $monitored . ' online','failures'=>0,'monitored'=>$monitored,'online'=>$online,'clients'=>$clients];
         }
         if ($hasStopped) {
-            return ['state'=>'stopped','label'=>'health: stopped','failures'=>0,'monitored'=>$monitored,'clients'=>$clients];
+            return ['state'=>'stopped','label'=>'Health: ' . $online . '/' . $monitored . ' online','failures'=>0,'monitored'=>$monitored,'online'=>$online,'clients'=>$clients];
         }
-        return ['state'=>'online','label'=>'health: online','failures'=>0,'monitored'=>$monitored,'clients'=>$clients];
+        return ['state'=>'online','label'=>'Health: ' . $online . '/' . $monitored . ' online','failures'=>0,'monitored'=>$monitored,'online'=>$online,'clients'=>$clients];
+    }
+
+    /**
+     * Aggregate enabled client/server runtime counts for the General page.
+     */
+    private function runtimeSummary(array $status): array
+    {
+        $live = [];
+        foreach (($status['tunnels'] ?? []) as $tunnel) {
+            $iface = trim((string)($tunnel['interface'] ?? ''));
+            if ($iface !== '' && !empty($tunnel['up'])) {
+                $live[$iface] = true;
+            }
+        }
+
+        $summary = [
+            'clients' => ['running' => 0, 'total' => 0],
+            'servers' => ['running' => 0, 'total' => 0],
+        ];
+        $config = \OPNsense\Core\Config::getInstance()->object();
+
+        foreach (($config->OPNsense->amneziawg->instances->instance ?? []) as $inst) {
+            if ((string)($inst->enabled ?? '0') !== '1') {
+                continue;
+            }
+            $summary['clients']['total']++;
+            $iface = 'awg' . (string)(int)($inst->interface_number ?? 0);
+            if (isset($live[$iface])) {
+                $summary['clients']['running']++;
+            }
+        }
+
+        foreach (($config->OPNsense->amneziawg->servers->server ?? []) as $server) {
+            if ((string)($server->enabled ?? '0') !== '1') {
+                continue;
+            }
+            $summary['servers']['total']++;
+            $iface = 'awg' . (string)(int)($server->interface_number ?? 0);
+            if (isset($live[$iface])) {
+                $summary['servers']['running']++;
+            }
+        }
+
+        return $summary;
     }
 
     /**
@@ -272,9 +316,15 @@ class ServiceController extends ApiMutableServiceControllerBase
                 $decoded = [];
             }
             $decoded['health'] = $this->healthSummary();
+            $decoded['summary'] = $this->runtimeSummary($decoded);
             return $decoded;
         }
-        return ['status' => 'error', 'message' => $result, 'health' => $this->healthSummary()];
+        return [
+            'status' => 'error',
+            'message' => $result,
+            'health' => $this->healthSummary(),
+            'summary' => ['clients'=>['running'=>0,'total'=>0], 'servers'=>['running'=>0,'total'=>0]],
+        ];
     }
 
     /**

@@ -211,6 +211,88 @@
         );
 
         // ── Server peers grid ────────────────────────────────────────
+        function decodePeerClientConfig(data) {
+            if (!data || !data.config_b64) {
+                throw new Error("{{ lang._('Missing client configuration payload') }}");
+            }
+            var binary = atob(data.config_b64);
+            var bytes = new Uint8Array(binary.length);
+            for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            if (window.TextDecoder) return new TextDecoder('utf-8').decode(bytes);
+            var escaped = '';
+            for (var j = 0; j < bytes.length; j++) escaped += '%' + ('0' + bytes[j].toString(16)).slice(-2);
+            return decodeURIComponent(escaped);
+        }
+
+        function fetchPeerClientConfig(uuid, done) {
+            ajaxGet('/api/amneziawg/peer/client_config/' + uuid, {}, function (data) {
+                if (!data || data.status !== 'ok') {
+                    BootstrapDialog.show({
+                        type: BootstrapDialog.TYPE_DANGER,
+                        title: "{{ lang._('Client Configuration') }}",
+                        message: $('<div>').text((data && data.message) || "{{ lang._('Unable to generate client configuration') }}").html(),
+                        buttons: [{label: "{{ lang._('Close') }}", action: function(d){d.close();}}]
+                    });
+                    return;
+                }
+                done(data);
+            });
+        }
+
+        function showPeerQr(uuid) {
+            fetchPeerClientConfig(uuid, function (data) {
+                var $box = $('<div style="text-align:center;"></div>');
+                var $qr = $('<div style="display:inline-block;background:#fff;padding:12px;"></div>');
+                var $progress = $('<div style="margin-top:8px;color:#666;"></div>');
+                var qrTimer = null, qrIndex = 0;
+                $box.append($qr).append($progress);
+
+                function renderQr(chunks) {
+                    $qr.empty().qrcode({data: chunks[qrIndex], errorCorrectionLevel: 'L', cellSize: 3});
+                    if (chunks.length > 1) $progress.text('{{ lang._("QR chunk") }} ' + (qrIndex + 1) + ' / ' + chunks.length);
+                    else $progress.empty();
+                }
+
+                BootstrapDialog.show({
+                    type: BootstrapDialog.TYPE_INFO,
+                    title: "{{ lang._('AmneziaVPN Client QR Code') }}",
+                    message: $box,
+                    onshown: function () {
+                        try {
+                            var chunks = data.amnezia_qr_chunks || [];
+                            if (!Array.isArray(chunks) || chunks.length === 0) throw new Error("{{ lang._('Missing AmneziaVPN QR payload') }}");
+                            renderQr(chunks);
+                            if (chunks.length > 1) {
+                                qrTimer = setInterval(function () {
+                                    qrIndex = (qrIndex + 1) % chunks.length;
+                                    renderQr(chunks);
+                                }, 1000);
+                            }
+                        } catch (e) {
+                            $qr.empty().append($('<div class="alert alert-danger"></div>').text(e.message || "{{ lang._('QR generation failed') }}"));
+                        }
+                    },
+                    onhide: function () { if (qrTimer !== null) clearInterval(qrTimer); },
+                    buttons: [{label: "{{ lang._('Close') }}", action: function(d){d.close();}}]
+                });
+            });
+        }
+
+        function downloadPeerConfig(uuid) {
+            fetchPeerClientConfig(uuid, function (data) {
+                var config;
+                try { config = decodePeerClientConfig(data); }
+                catch (e) { alert(e.message || "{{ lang._('Unable to decode client configuration') }}"); return; }
+                var blob = new Blob([config], {type: 'application/octet-stream'});
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = data.name || 'amneziawg-client.conf';
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+            });
+        }
+
         $("#{{formGridPeer['table_id']}}").UIBootgrid(
             {   'search': '/api/amneziawg/peer/search_item',
                 'get':    '/api/amneziawg/peer/get_item/',
@@ -218,6 +300,22 @@
                 'add':    '/api/amneziawg/peer/add_item/',
                 'del':    '/api/amneziawg/peer/del_item/',
                 'toggle': '/api/amneziawg/peer/toggle_item/',
+                'commands': {
+                    qrcode: {
+                        filter: function (cell) { return cell.getData().client_config === 'ready'; },
+                        method: function (event, cell) { showPeerQr(cell.getData().uuid); },
+                        classname: 'fa fa-qrcode fa-fw',
+                        title: "{{ lang._('Show client QR code') }}",
+                        sequence: 1
+                    },
+                    download: {
+                        filter: function (cell) { return cell.getData().client_config === 'ready'; },
+                        method: function (event, cell) { downloadPeerConfig(cell.getData().uuid); },
+                        classname: 'fa fa-download fa-fw',
+                        title: "{{ lang._('Download client .conf') }}",
+                        sequence: 2
+                    }
+                },
                 'options': {'formatters': {
                     'peerstatus': function (column, row) {
                         switch (row.runtime) {
@@ -281,10 +379,8 @@
             var $clientPrivate = $('<input type="hidden" id="peer.client_private_key" name="peer[client_private_key]" value="">');
             $peerPk.after($clientPrivate);
             var $peerTools = $('<div class="btn-group" style="margin-top:4px;"></div>');
-            var $genClient = $('<button type="button" class="btn btn-xs btn-default"><i class="fa fa-gear"></i> {{ lang._('Generate Client Keys') }}</button>');
-            var $qrClient = $('<button type="button" class="btn btn-xs btn-default"><i class="fa fa-qrcode"></i> {{ lang._('QR Code') }}</button>');
-            var $downloadClient = $('<button type="button" class="btn btn-xs btn-default"><i class="fa fa-download"></i> {{ lang._('Download .conf') }}</button>');
-            $peerTools.append($genClient, $qrClient, $downloadClient).insertAfter($clientPrivate);
+            var $genClient = $('<button type="button" class="btn btn-xs btn-default"><i class="fa fa-gear fa-fw"></i> {{ lang._('Generate Client Keys') }}</button>');
+            $peerTools.append($genClient).insertAfter($clientPrivate);
 
             var $peerPsk = $peerDialog.find('input[id="peer.preshared_key"]');
 
@@ -299,116 +395,10 @@
                         BootstrapDialog.show({
                             type: BootstrapDialog.TYPE_WARNING,
                             title: "{{ lang._('New Client Keys') }}",
-                            message: "{{ lang._('Save this peer before using QR Code or Download .conf. Saving installs the newly generated client keypair and preshared key on the server.') }}",
+                            message: "{{ lang._('Save this peer first. Then use the QR Code or Download .conf commands in the Server Peers table. Saving installs the newly generated client keypair and preshared key on the server.') }}",
                             buttons: [{label: "{{ lang._('Close') }}", action: function(d){d.close();}}]
                         });
                     } else alert(data.message || "{{ lang._('Client key generation failed') }}");
-                });
-            });
-
-            function getSavedPeerConfig(done) {
-                ajaxCall('/api/amneziawg/peer/client_config_lookup', {peer: {
-                    server: $peerDialog.find('[id="peer.server"]').val() || '',
-                    public_key: $peerPk.val() || ''
-                }}, function (data) {
-                    if (!data || data.status !== 'ok') {
-                        BootstrapDialog.show({type: BootstrapDialog.TYPE_DANGER,
-                            title: "{{ lang._('Client Configuration') }}",
-                            message: $('<div>').text((data && data.message) || "{{ lang._('Unable to generate client configuration') }}").html(),
-                            buttons: [{label: "{{ lang._('Close') }}", action: function(d){d.close();}}]});
-                        return;
-                    }
-                    done(data);
-                });
-            }
-
-            function decodeClientConfig(data) {
-                if (!data || !data.config_b64) {
-                    throw new Error("{{ lang._('Missing client configuration payload') }}");
-                }
-                var binary = atob(data.config_b64);
-                var bytes = new Uint8Array(binary.length);
-                for (var i = 0; i < binary.length; i++) {
-                    bytes[i] = binary.charCodeAt(i);
-                }
-                if (window.TextDecoder) {
-                    return new TextDecoder('utf-8').decode(bytes);
-                }
-                var escaped = '';
-                for (var j = 0; j < bytes.length; j++) {
-                    escaped += '%' + ('0' + bytes[j].toString(16)).slice(-2);
-                }
-                return decodeURIComponent(escaped);
-            }
-            $qrClient.click(function () {
-                getSavedPeerConfig(function (data) {
-                    var $box = $('<div style="text-align:center;"></div>');
-                    var $qr = $('<div style="display:inline-block;background:#fff;padding:12px;"></div>');
-                    var $progress = $('<div style="margin-top:8px;color:#666;"></div>');
-                    var qrTimer = null;
-                    var qrIndex = 0;
-                    $box.append($qr).append($progress);
-
-                    function renderQr(chunks) {
-                        $qr.empty().qrcode({
-                            data: chunks[qrIndex],
-                            errorCorrectionLevel: 'L',
-                            cellSize: 3
-                        });
-                        if (chunks.length > 1) {
-                            $progress.text('{{ lang._("QR chunk") }} ' + (qrIndex + 1) + ' / ' + chunks.length);
-                        } else {
-                            $progress.empty();
-                        }
-                    }
-
-                    BootstrapDialog.show({type: BootstrapDialog.TYPE_INFO,
-                        title: "{{ lang._('AmneziaVPN Client QR Code') }}",
-                        message: $box,
-                        onshown: function () {
-                            try {
-                                var chunks = data.amnezia_qr_chunks || [];
-                                if (!Array.isArray(chunks) || chunks.length === 0) {
-                                    throw new Error("{{ lang._('Missing AmneziaVPN QR payload') }}");
-                                }
-                                renderQr(chunks);
-                                // AmneziaVPN itself rotates multi-part self-hosted QR codes once per second.
-                                if (chunks.length > 1) {
-                                    qrTimer = setInterval(function () {
-                                        qrIndex = (qrIndex + 1) % chunks.length;
-                                        renderQr(chunks);
-                                    }, 1000);
-                                }
-                            } catch (e) {
-                                $qr.empty().append($('<div class="alert alert-danger"></div>').text(e.message || "{{ lang._('QR generation failed') }}"));
-                            }
-                        },
-                        onhide: function () {
-                            if (qrTimer !== null) {
-                                clearInterval(qrTimer);
-                                qrTimer = null;
-                            }
-                        },
-                        buttons: [{label: "{{ lang._('Close') }}", action: function(d){d.close();}}]});
-                });
-            });
-
-            $downloadClient.click(function () {
-                getSavedPeerConfig(function (data) {
-                    var config;
-                    try {
-                        config = decodeClientConfig(data);
-                    } catch (e) {
-                        alert(e.message || "{{ lang._('Unable to decode client configuration') }}");
-                        return;
-                    }
-                    var blob = new Blob([config], {type: 'application/octet-stream'});
-                    var url = URL.createObjectURL(blob);
-                    var a = document.createElement('a');
-                    a.href = url;
-                    a.download = data.name || 'amneziawg-client.conf';
-                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
                 });
             });
         }
@@ -556,15 +546,21 @@
         function updateStatus() {
             if (_statusPaused) return;
             ajaxGet("/api/amneziawg/service/tunnel_status", {}, function (data) {
-                var tunnels = (data.status === 'ok' && data.tunnels) ? data.tunnels : [];
-                var running = tunnels.length > 0;
-                var label = running
-                    ? tunnels.map(function (t) { return t.interface; }).join(', ') + ': running'
-                    : 'awg: stopped';
-                $('#badge_awg')
-                    .removeClass('label-success label-danger label-default')
-                    .addClass(running ? 'label-success' : 'label-danger')
-                    .text(label);
+                var summary = data.summary || {};
+                var clients = summary.clients || {running: 0, total: 0};
+                var servers = summary.servers || {running: 0, total: 0};
+                var running = (parseInt(clients.running || 0, 10) + parseInt(servers.running || 0, 10)) > 0;
+
+                function runtimeBadge(selector, title, state) {
+                    var up = parseInt(state.running || 0, 10), total = parseInt(state.total || 0, 10);
+                    var cls = total === 0 ? 'label-default' : (up === total ? 'label-success' : (up === 0 ? 'label-danger' : 'label-warning'));
+                    $(selector)
+                        .removeClass('label-success label-danger label-warning label-default')
+                        .addClass(cls)
+                        .text(title + ': ' + up + '/' + total + ' running');
+                }
+                runtimeBadge('#badge_clients', 'Clients', clients);
+                runtimeBadge('#badge_servers', 'Servers', servers);
 
                 var health = data.health || {};
                 var healthState = health.state || 'waiting';
@@ -575,8 +571,7 @@
                 var healthTitle = '';
                 if (Array.isArray(health.clients)) {
                     healthTitle = health.clients.map(function (h) {
-                        var suffix = (h.state === 'offline' && h.failures > 0 && h.failures < 3)
-                            ? ' ' + h.failures + '/3' : '';
+                        var suffix = (h.state === 'offline' && h.failures > 0 && h.failures < 3) ? ' ' + h.failures + '/3' : '';
                         return h.name + ': ' + h.state + suffix;
                     }).join('; ');
                 }
@@ -584,11 +579,11 @@
                     .removeClass('label-success label-danger label-warning label-default')
                     .addClass(healthClass)
                     .attr('title', healthTitle)
-                    .text(health.label || 'health: waiting');
+                    .text(health.label || 'Health: waiting');
 
                 if (!_statusPaused) {
                     $('#btnStart').prop('disabled', running);
-                    $('#btnStop').prop('disabled', !running);
+                    $('#btnStop, #btnRestart').prop('disabled', !running);
                 }
             });
         }
@@ -750,6 +745,13 @@
             loadDiagnostics();
         });
 
+        function diagBadge(text, kind) {
+            var cls = kind === 'ok' ? 'label-success'
+                : (kind === 'bad' ? 'label-danger'
+                : (kind === 'warn' ? 'label-warning' : 'label-default'));
+            return '<span class="label ' + cls + '">' + $('<div>').text(text).html() + '</span>';
+        }
+
         function loadDiagnostics() {
             $('#diagLoading').show();
             $('#diagError').hide();
@@ -802,24 +804,24 @@
                     : (connectivity === 'offline' ? 'label-danger'
                     : (connectivity === 'stopped' ? 'label-default' : 'label-warning'));
                 $('#diag_health_status').html('<span class="label ' + healthClass + '">' + connectivity + '</span>');
-                $('#diag_health_enabled').text(data.health_monitor_enabled ? 'enabled' : 'disabled');
+                $('#diag_health_enabled').html(diagBadge(data.health_monitor_enabled ? 'enabled' : 'disabled', data.health_monitor_enabled ? 'ok' : 'neutral'));
                 $('#diag_health_target').text(data.health_probe_target || data.health_target_configured || '-');
                 $('#diag_health_latency').text(data.health_latency_ms !== null && data.health_latency_ms !== undefined ? data.health_latency_ms + ' ms' : '-');
-                $('#diag_health_failures').text(data.health_failures || 0);
+                var failures = parseInt(data.health_failures || 0, 10); $('#diag_health_failures').html(diagBadge(String(failures), failures >= 3 ? 'bad' : (failures > 0 ? 'warn' : 'ok')));
                 $('#diag_health_message').text(data.health_message || '-');
-                $('#diag_assignment').text(data.assignment ? data.assignment + (data.assignment_enabled ? ' (enabled)' : ' (disabled)') : '-');
-                $('#diag_gateway_sync').text(data.gateway_health_sync_enabled ? (data.gateway_sync_ready ? 'enabled / ready' : 'enabled / not ready') : 'disabled');
+                $('#diag_assignment').html(data.assignment ? diagBadge(data.assignment + (data.assignment_enabled ? ' (enabled)' : ' (disabled)'), data.assignment_enabled ? 'ok' : 'warn') : '-');
+                $('#diag_gateway_sync').html(diagBadge(data.gateway_health_sync_enabled ? (data.gateway_sync_ready ? 'enabled / ready' : 'enabled / not ready') : 'disabled', data.gateway_health_sync_enabled ? (data.gateway_sync_ready ? 'ok' : 'warn') : 'neutral'));
                 $('#diag_gateway').text(data.native_gateway_name
                     ? data.native_gateway_name + ' (' + (data.native_gateway_address || '-') + ')'
                     : (data.native_gateway_ambiguous ? 'ambiguous' : '-'));
-                $('#diag_gateway_monitor').text(data.native_gateway_name
-                    ? (data.native_gateway_monitor_disabled ? 'disabled (plugin health source)' : 'enabled')
+                $('#diag_gateway_monitor').html(data.native_gateway_name
+                    ? diagBadge(data.native_gateway_monitor_disabled ? 'disabled (plugin health source)' : 'enabled', data.native_gateway_monitor_disabled ? 'ok' : 'warn')
                     : '-');
-                $('#diag_gateway_force').text(data.native_gateway_name
-                    ? (data.native_gateway_force_down ? 'forced down' : 'up')
+                $('#diag_gateway_force').html(data.native_gateway_name
+                    ? diagBadge(data.native_gateway_force_down ? 'forced down' : 'up', data.native_gateway_force_down ? 'bad' : 'ok')
                     : '-');
-                $('#diag_gateway_status').text(data.native_gateway_status_text || data.native_gateway_status || '-');
-                $('#diag_pf_route').text(data.pf_route_to_present ? 'present' : 'not found');
+                var gwStatus = data.native_gateway_status_text || data.native_gateway_status || '-'; $('#diag_gateway_status').html(gwStatus === '-' ? '-' : diagBadge(gwStatus, /online|up/i.test(gwStatus) ? 'ok' : (/offline|down/i.test(gwStatus) ? 'bad' : 'warn')));
+                $('#diag_pf_route').html(diagBadge(data.pf_route_to_present ? 'present' : 'not found', data.pf_route_to_present ? 'ok' : 'bad'));
                 $('#btnHealthProbe').prop('disabled', !selectedDiagUuid());
             });
         }
@@ -896,24 +898,24 @@
 
         // ── Log tab ─────────────────────────────────────────────────
         function loadLog() {
-            $('#btnLogRefresh').prop('disabled', true);
-            $('#logContent').text('{{ lang._("Loading...") }}');
+            $('#logServiceRefreshBtn, #logWatchdogRefreshBtn').prop('disabled', true);
+            $('#logServiceContent, #logWatchdogContent').text('{{ lang._("Loading...") }}');
             $.post('/api/amneziawg/service/log', null, function (data) {
-                $('#logContent').text(data.log || '{{ lang._("Log is empty") }}');
-                $('#btnLogRefresh').prop('disabled', false);
+                var raw = (data && data.log) || '';
+                var lines = raw ? raw.split(/\r?\n/) : [];
+                var watchdog = lines.filter(function (line) { return line.indexOf('WATCHDOG:') !== -1; });
+                var service = lines.filter(function (line) { return line.indexOf('WATCHDOG:') === -1; });
+                $('#logServiceContent').text(service.filter(Boolean).join('\n') || '{{ lang._("Service log is empty") }}');
+                $('#logWatchdogContent').text(watchdog.filter(Boolean).join('\n') || '{{ lang._("Watchdog log is empty") }}');
+                $('#logServiceRefreshBtn, #logWatchdogRefreshBtn').prop('disabled', false);
             }, 'json').fail(function () {
-                $('#logContent').text('{{ lang._("Failed to load log") }}');
-                $('#btnLogRefresh').prop('disabled', false);
+                $('#logServiceContent, #logWatchdogContent').text('{{ lang._("Failed to load log") }}');
+                $('#logServiceRefreshBtn, #logWatchdogRefreshBtn').prop('disabled', false);
             });
         }
 
-        $('a[href="#logs"]').on('shown.bs.tab', function () {
-            loadLog();
-        });
-
-        $('#btnLogRefresh').click(function () {
-            loadLog();
-        });
+        $('a[href="#logs"]').on('shown.bs.tab', loadLog);
+        $('#logServiceRefreshBtn, #logWatchdogRefreshBtn').click(loadLog);
 
         // ── Copy Debug Info ─────────────────────────────────────────
         $('#btnCopyDebug').click(function () {
@@ -1019,14 +1021,18 @@
     </div>
 
     <div id="general" class="tab-pane fade in{% if section == 'general' %} active{% endif %}"{% if section != 'general' %} style="display:none;"{% endif %}>
-        <div style="padding: 10px 15px 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;">
-            <span id="badge_awg" class="label label-default">awg: ...</span>
-            <span id="badge_health" class="label label-default" title="">health: ...</span>
-            <span style="margin-left: 4px; border-left: 1px solid #ddd; padding-left: 8px; display: inline-flex; gap: 4px;">
-                <button id="btnStart" class="btn btn-xs btn-success" title="{{ lang._('Start all enabled tunnels') }}"><i class="fa fa-play"></i> {{ lang._('Start') }}</button>
-                <button id="btnStop" class="btn btn-xs btn-danger" title="{{ lang._('Stop all tunnels') }}"><i class="fa fa-stop"></i> {{ lang._('Stop') }}</button>
-                <button id="btnRestart" class="btn btn-xs btn-warning" title="{{ lang._('Restart without saving config') }}"><i class="fa fa-refresh"></i> {{ lang._('Restart') }}</button>
-            </span>
+        <div style="padding: 8px 15px; border-bottom: 1px solid #ddd; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+            <div>
+                <span id="badge_clients" class="label label-default">Clients: ...</span>
+                <span id="badge_servers" class="label label-default">Servers: ...</span>
+                <span id="badge_health" class="label label-default" title="">Health: ...</span>
+            </div>
+            <div style="width: 1px; height: 22px; background: #ddd;"></div>
+            <div style="display: flex; gap: 4px;">
+                <button id="btnStart" class="btn btn-xs btn-success" title="{{ lang._('Start all enabled AmneziaWG instances') }}"><i class="fa fa-play fa-fw"></i> {{ lang._('Start All') }}</button>
+                <button id="btnStop" class="btn btn-xs btn-danger" title="{{ lang._('Stop all running AmneziaWG instances') }}"><i class="fa fa-stop fa-fw"></i> {{ lang._('Stop All') }}</button>
+                <button id="btnRestart" class="btn btn-xs btn-warning" title="{{ lang._('Restart all running AmneziaWG instances without saving pending form changes') }}"><i class="fa fa-refresh fa-fw"></i> {{ lang._('Restart All') }}</button>
+            </div>
         </div>
         {{ partial("layout_partials/base_form", ['fields': generalForm, 'id': 'frm_general_settings']) }}
     </div>
@@ -1105,13 +1111,27 @@
     </div>
 
     <div id="logs" class="tab-pane fade in"{% if section != 'diagnostics' %} style="display:none;"{% endif %}>
-        <div style="padding: 15px;">
-            <div style="margin-bottom: 10px;">
-                <button id="btnLogRefresh" class="btn btn-sm btn-default">
-                    <i class="fa fa-refresh"></i> {{ lang._('Refresh') }}
-                </button>
+        <div style="padding: 8px 15px; border-bottom: 1px solid #ddd;">
+            <ul class="nav nav-pills nav-sm" style="margin:0;">
+                <li class="active"><a data-toggle="tab" href="#logService"><i class="fa fa-terminal fa-fw"></i> {{ lang._('Service Log') }}</a></li>
+                <li><a data-toggle="tab" href="#logWatchdog"><i class="fa fa-heartbeat fa-fw"></i> {{ lang._('Watchdog Log') }}</a></li>
+            </ul>
+        </div>
+        <div class="tab-content" style="padding: 0 15px 15px;">
+            <div id="logService" class="tab-pane fade in active" style="padding-top:10px;">
+                <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                    <button id="logServiceRefreshBtn" class="btn btn-sm btn-default"><i class="fa fa-refresh fa-fw"></i> {{ lang._('Refresh') }}</button>
+                    <span class="text-muted" style="font-size:12px;">{{ lang._('/var/log/amneziawg.log — service/lifecycle entries, last 150 lines') }}</span>
+                </div>
+                <pre id="logServiceContent" style="min-height:300px;max-height:550px;overflow-y:auto;background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:4px;border:1px solid #444;">{{ lang._('Switch to this tab to load log...') }}</pre>
             </div>
-            <pre id="logContent" style="max-height: 500px; overflow-y: auto; font-size: 12px; background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px;">{{ lang._('Switch to this tab to load log...') }}</pre>
+            <div id="logWatchdog" class="tab-pane fade in" style="padding-top:10px;">
+                <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                    <button id="logWatchdogRefreshBtn" class="btn btn-sm btn-default"><i class="fa fa-refresh fa-fw"></i> {{ lang._('Refresh') }}</button>
+                    <span class="text-muted" style="font-size:12px;">{{ lang._('/var/log/amneziawg.log — WATCHDOG entries, last 150 lines') }}</span>
+                </div>
+                <pre id="logWatchdogContent" style="min-height:300px;max-height:550px;overflow-y:auto;background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:4px;border:1px solid #444;">{{ lang._('Switch to this tab to load log...') }}</pre>
+            </div>
         </div>
     </div>
 

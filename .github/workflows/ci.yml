@@ -51,6 +51,8 @@ jobs:
           grep -Fq "'healthstatus'" plugin/mvc/app/views/OPNsense/AmneziaWG/general.volt
           grep -Fq "health_runtime" plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/InstanceController.php
           grep -Fq "awg_health_cache_invalidate_iface" plugin/scripts/AmneziaWG/amneziawg-service-control.php
+          grep -Fq "@unlink(AWG_STOPPED_FLAG)" plugin/scripts/AmneziaWG/amneziawg-service-control.php
+          grep -Fq "stale service-level stopped flag remained" install.sh
           grep -Fq "\$connectivity = 'waiting'" plugin/scripts/AmneziaWG/amneziawg-ifstats.php
           grep -Fq 'amneziawg-health.php' plugin/scripts/AmneziaWG/amneziawg-watchdog.php
           grep -Fq 'Force Down' README.md

@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.1.1 — 2026-09-19
+
+- Fixed post-install and post-restart health getting stuck in `waiting` when recreating an `awgN` interface removed the native OPNsense gateway host route.
+- Health now asks OPNsense routing to reconcile the existing native gateway route once before returning `waiting`; the plugin still does not own a permanent gateway route.
+- Forced-down recovery continues to use only the temporary runtime probe route introduced in 2.1.0.
+
+
 ## v2.1.0 — 2026-09-19
 
 - Added opt-in per-client active ICMP data-plane health monitoring. The probe is sourced from the AWG tunnel address and defaults to the native OPNsense gateway on the assigned AWG interface.

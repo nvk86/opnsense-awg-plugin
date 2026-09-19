@@ -57,7 +57,7 @@ jobs:
 
       - name: v2.1.0 health integration
         run: |
-          grep -Fq 'PLUGIN_VERSION="2.1.0"' install.sh
+          grep -Fq 'PLUGIN_VERSION="2.1.1"' install.sh
           grep -Fq '<version>2.1.0</version>' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
           grep -Fq '<health_monitor type="BooleanField">' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
           grep -Fq '<gateway_health_sync type="BooleanField">' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
@@ -75,6 +75,9 @@ jobs:
           grep -Fq 'id="badge_health"' plugin/mvc/app/views/OPNsense/AmneziaWG/general.volt
           grep -Fq 'healthSummary' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php
           grep -Fq "Route to health target currently uses" plugin/scripts/AmneziaWG/amneziawg-health.php
+          grep -Fq "awg_health_reconcile_gateway_route" plugin/scripts/AmneziaWG/amneziawg-health.php
+          grep -Fq "/usr/local/etc/rc.routing_configure alarm" plugin/scripts/AmneziaWG/amneziawg-health.php
+          grep -Fq "route_reconciled" plugin/scripts/AmneziaWG/amneziawg-health.php
           grep -Fq "awg_health_probe_route_ensure" plugin/scripts/AmneziaWG/amneziawg-health.php
           grep -Fq "probe_route_owned" plugin/scripts/AmneziaWG/amneziawg-health.php
           grep -Fq "awg_gs_cleanup_probe_route" plugin/scripts/AmneziaWG/amneziawg-gateway-sync.php

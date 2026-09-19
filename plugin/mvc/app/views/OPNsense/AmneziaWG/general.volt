@@ -137,6 +137,26 @@
                                 default:
                                     return '<span class="label label-default">?</span>';
                             }
+                        },
+                        'healthstatus': function (column, row) {
+                            switch (row.health_runtime) {
+                                case 'online':
+                                    return '<span class="label label-success">{{ lang._('online') }}</span>';
+                                case 'offline':
+                                    var failures = parseInt(row.health_failures || 0, 10);
+                                    var suffix = failures > 0 && failures < 3 ? ' ' + failures + '/3' : '';
+                                    return '<span class="label label-danger">{{ lang._('offline') }}' + suffix + '</span>';
+                                case 'stale':
+                                    return '<span class="label label-warning">{{ lang._('stale') }}</span>';
+                                case 'waiting':
+                                    return '<span class="label label-info">{{ lang._('waiting') }}</span>';
+                                case 'stopped':
+                                    return '<span class="label label-default">{{ lang._('stopped') }}</span>';
+                                case 'disabled':
+                                    return '<span class="label label-default">{{ lang._('disabled') }}</span>';
+                                default:
+                                    return '<span class="label label-default">?</span>';
+                            }
                         }
                     }
                 }
@@ -553,6 +573,15 @@
         }
         updateStatus();
         _statusTimer = setInterval(updateStatus, 10000);
+
+        // Health probes run once per minute. Refresh only the client grid at a
+        // lower cadence so the Health column follows probe results without
+        // adding configd load to the 10-second service-status poll.
+        var _clientGridTimer = setInterval(function () {
+            if (!_statusPaused && $('#{{formGridInstance['table_id']}}').is(':visible')) {
+                $('#{{formGridInstance['table_id']}}').bootgrid('reload');
+            }
+        }, 30000);
 
         // ── Start / Stop / Restart (service level: all tunnels) ───────
         function serviceAction(action, confirmMsg) {

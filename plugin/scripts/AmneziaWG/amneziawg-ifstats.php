@@ -357,10 +357,13 @@ $gateway = awg_native_gateway_info((string)$assignment['key'], $healthTarget);
 $health = awg_health_info($uuid);
 $checked = (int)($health['checked_at'] ?? 0);
 $age = $checked > 0 ? max(0, time() - $checked) : null;
-if (($health['status'] ?? '') === 'stopped') {
+if (!$ifStatus['running']) {
     $connectivity = 'stopped';
 } elseif ($checked <= 0) {
-    $connectivity = 'unknown';
+    $connectivity = 'waiting';
+} elseif (($health['status'] ?? '') === 'stopped') {
+    // Runtime is up, so a cached stopped state predates the latest start.
+    $connectivity = 'waiting';
 } elseif ($age !== null && $age > 150) {
     $connectivity = 'stale';
 } else {

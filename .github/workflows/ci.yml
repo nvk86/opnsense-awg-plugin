@@ -34,6 +34,27 @@ jobs:
               print(path)
           PY
 
+      - name: General page JavaScript syntax
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+
+          src = pathlib.Path("plugin/mvc/app/views/OPNsense/AmneziaWG/general.volt").read_text()
+          js = src.split("<script>", 1)[1].split("</script>", 1)[0]
+
+          # Replace Volt expressions embedded in JavaScript strings/selectors.
+          js = re.sub(r"{{.*?}}", "VOLT", js, flags=re.S)
+
+          # For syntax validation include the diagnostics-only block; remove
+          # only the Volt control markers themselves.
+          js = re.sub(r"{%\s*if\s+section\s*==\s*'diagnostics'\s*%}", "", js)
+          js = re.sub(r"{%\s*endif\s*%}", "", js)
+
+          pathlib.Path("/tmp/general.js").write_text(js)
+          PY
+          node --check /tmp/general.js
+
       - name: v2.1.0 health integration
         run: |
           grep -Fq 'PLUGIN_VERSION="2.1.0"' install.sh

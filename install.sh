@@ -302,6 +302,9 @@ postflight(){
     grep -q '^\[gateway_sync_release\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync release action missing after install"
     /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-health.php >/dev/null || die "Health script syntax check failed"
     /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php >/dev/null || die "Gateway sync script syntax check failed"
+    /usr/local/bin/php -l /usr/local/opnsense/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php >/dev/null || die "Service API syntax check failed"
+    grep -Fq 'public function metricsAction()' /usr/local/opnsense/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php || die "Prometheus metrics endpoint missing after install"
+    grep -Fq '<acl_amneziawg_metrics>' /usr/local/opnsense/mvc/app/models/OPNsense/AmneziaWG/ACL/ACL.xml || die "Prometheus metrics ACL missing after install"
     grep -Rqs 'if_amn' /usr/local/opnsense/scripts/AmneziaWG /usr/local/etc/rc.syshook.d/start/50-amneziawg && die "Legacy if_amn reference remains in runtime scripts"
     # A healthy backend can legitimately report either "stopped" (no live
     # tunnels yet) or "ok".  At this point the installer intentionally stopped

@@ -1,10 +1,10 @@
 #!/bin/sh
-# opnsense-awg v2.0.5 installer
+# opnsense-awg v2.1.0 installer
 # Migrates the legacy FreeBSD amnezia-kmod/amnezia-tools AWG2 stack to the
 # project-owned AWG 3.1 packages, preserving OPNsense configuration and keys.
 set -eu
 
-PLUGIN_VERSION="2.0.5"
+PLUGIN_VERSION="2.1.0"
 KMOD_REPO="nvk86/opnsense-awg-kmod"
 TOOLS_REPO="nvk86/opnsense-awg-tools"
 KMOD_VERSION=""
@@ -296,6 +296,12 @@ postflight(){
     _tools_upstream=${TOOLS_VERSION%%_*}
     /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
     grep -q '\[testconnect\]' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf && die "Obsolete testconnect action is still installed"
+    grep -q '^\[health\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Health action missing after install"
+    grep -q '^\[gateway_sync\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync action missing after install"
+    grep -q '^\[gateway_sync_state\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync state action missing after install"
+    grep -q '^\[gateway_sync_release\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync release action missing after install"
+    /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-health.php >/dev/null || die "Health script syntax check failed"
+    /usr/local/bin/php -l /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php >/dev/null || die "Gateway sync script syntax check failed"
     grep -Rqs 'if_amn' /usr/local/opnsense/scripts/AmneziaWG /usr/local/etc/rc.syshook.d/start/50-amneziawg && die "Legacy if_amn reference remains in runtime scripts"
     # A healthy backend can legitimately report either "stopped" (no live
     # tunnels yet) or "ok".  At this point the installer intentionally stopped
@@ -324,7 +330,12 @@ postflight(){
     if [ -n "$RUNNING_IFACES" ]; then
         _st=$(/usr/local/sbin/configctl amneziawg status 2>&1 || true)
         printf '%s\n' "$_st" | grep -q '"status":"ok"' || die "restored tunnel status check failed: $_st"
+        [ ! -e /var/run/amneziawg_stopped.flag ] || die "stale service-level stopped flag remained after runtime restore"
     fi
+
+    # Reconcile any existing 2.1.x ownership registry after files/configd are
+    # restored. Fresh 2.0.x upgrades have no health-sync state, so this is a no-op.
+    /usr/local/sbin/configctl amneziawg gateway_sync reconcile >/dev/null 2>&1 || true
 
     COMMITTED=1
     log "[OK] Backend, module, package versions, configuration and previous runtime state validated"
@@ -405,7 +416,12 @@ on_exit(){
 
 uninstall(){
     need_root; choose_pkg
+    # Restore original Force Down values before removing the sync backend.
+    if [ -f /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php ]; then
+        /usr/local/bin/php /usr/local/opnsense/scripts/AmneziaWG/amneziawg-gateway-sync.php release_all >/dev/null 2>&1 || true
+    fi
     if [ -x /usr/local/sbin/configctl ]; then /usr/local/sbin/configctl amneziawg stop >/dev/null 2>&1 || true; fi
+    rm -f /var/run/amneziawg-health-*.json
     remove_plugin_files
     rm -f /var/lib/php/tmp/opnsense_menu_cache.xml
     service configd restart >/dev/null 2>&1 || true

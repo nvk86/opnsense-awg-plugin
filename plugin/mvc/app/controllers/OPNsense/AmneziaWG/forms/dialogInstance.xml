@@ -23,6 +23,17 @@
         </grid_view>
     </field>
     <field>
+        <!-- Grid-only per-client active health state from this instance UUID. -->
+        <id>instance.health_runtime</id>
+        <label>Health</label>
+        <type>ignore</type>
+        <grid_view>
+            <formatter>healthstatus</formatter>
+            <sortable>false</sortable>
+            <width>120</width>
+        </grid_view>
+    </field>
+    <field>
         <id>instance.name</id>
         <label>Name</label>
         <type>text</type>
@@ -89,6 +100,31 @@
         <grid_view>
             <ignore>true</ignore>
         </grid_view>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Health Monitoring and Gateway Sync</label>
+    </field>
+    <field>
+        <id>instance.health_monitor</id>
+        <label>Health Monitor</label>
+        <type>checkbox</type>
+        <help>Run an active ICMP data-plane probe through this AWG client every minute. The global Watchdog setting controls automatic tunnel restart; health monitoring and gateway state synchronization can run without automatic restart.</help>
+        <grid_view><ignore>true</ignore></grid_view>
+    </field>
+    <field>
+        <id>instance.health_target</id>
+        <label>Health Probe Target</label>
+        <type>text</type>
+        <help>Optional IPv4 address reachable through this tunnel. Leave empty to probe the native OPNsense gateway configured on the assigned AWG interface. The remote AWG tunnel address is recommended.</help>
+        <grid_view><ignore>true</ignore></grid_view>
+    </field>
+    <field>
+        <id>instance.gateway_health_sync</id>
+        <label>Gateway Health Sync</label>
+        <type>checkbox</type>
+        <help>Mirror verified AWG health into the native OPNsense gateway Force Down state for Gateway Group failover. Health Monitor must also be enabled. Assign and enable the AWG interface, configure one static IPv4 gateway, and disable native Gateway Monitoring for that gateway.</help>
+        <grid_view><ignore>true</ignore></grid_view>
     </field>
     <field>
         <type>header</type>

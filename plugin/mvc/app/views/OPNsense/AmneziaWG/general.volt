@@ -137,6 +137,27 @@
                                 default:
                                     return '<span class="label label-default">?</span>';
                             }
+                        },
+                        'healthstatus': function (column, row) {
+                            var title = $('<div>').text(row.health_message || '').html();
+                            switch (row.health_runtime) {
+                                case 'online':
+                                    return '<span class="label label-success" title="' + title + '">{{ lang._('online') }}</span>';
+                                case 'offline':
+                                    var failures = parseInt(row.health_failures || 0, 10);
+                                    var suffix = failures > 0 && failures < 3 ? ' ' + failures + '/3' : '';
+                                    return '<span class="label label-danger" title="' + title + '">{{ lang._('offline') }}' + suffix + '</span>';
+                                case 'waiting':
+                                    return '<span class="label label-info" title="' + title + '">{{ lang._('waiting') }}</span>';
+                                case 'stale':
+                                    return '<span class="label label-warning">{{ lang._('stale') }}</span>';
+                                case 'stopped':
+                                    return '<span class="label label-default">{{ lang._('stopped') }}</span>';
+                                case 'disabled':
+                                    return '<span class="label label-default">{{ lang._('disabled') }}</span>';
+                                default:
+                                    return '<span class="label label-default">?</span>';
+                            }
                         }
                     }
                 }
@@ -545,6 +566,26 @@
                     .addClass(running ? 'label-success' : 'label-danger')
                     .text(label);
 
+                var health = data.health || {};
+                var healthState = health.state || 'waiting';
+                var healthClass = healthState === 'online' ? 'label-success'
+                    : (healthState === 'offline' ? 'label-danger'
+                    : (healthState === 'disabled' || healthState === 'stopped' ? 'label-default'
+                    : 'label-warning'));
+                var healthTitle = '';
+                if (Array.isArray(health.clients)) {
+                    healthTitle = health.clients.map(function (h) {
+                        var suffix = (h.state === 'offline' && h.failures > 0 && h.failures < 3)
+                            ? ' ' + h.failures + '/3' : '';
+                        return h.name + ': ' + h.state + suffix;
+                    }).join('; ');
+                }
+                $('#badge_health')
+                    .removeClass('label-success label-danger label-warning label-default')
+                    .addClass(healthClass)
+                    .attr('title', healthTitle)
+                    .text(health.label || 'health: waiting');
+
                 if (!_statusPaused) {
                     $('#btnStart').prop('disabled', running);
                     $('#btnStop').prop('disabled', !running);
@@ -553,6 +594,14 @@
         }
         updateStatus();
         _statusTimer = setInterval(updateStatus, 10000);
+
+        // Health probes are per client and run independently. Refresh the
+        // Clients grid so each Health cell follows only that tunnel's cache.
+        var _clientGridTimer = setInterval(function () {
+            if (!_statusPaused && $('#{{formGridInstance['table_id']}}').is(':visible')) {
+                $('#{{formGridInstance['table_id']}}').bootgrid('reload');
+            }
+        }, 30000);
 
         // ── Start / Stop / Restart (service level: all tunnels) ───────
         function serviceAction(action, confirmMsg) {
@@ -660,6 +709,9 @@
             return $('#diagIface').val() || '';
         }
 
+        function selectedDiagUuid() {
+            return $('#diagIface option:selected').attr('data-uuid') || '';
+        }
 
         function loadDiagIfaceList() {
             var dfObj = new $.Deferred();
@@ -673,7 +725,9 @@
                 rows.forEach(function (row) {
                     var iface = 'awg' + (row.interface_number || '0');
                     var label = iface + ' — ' + (row.name || '') + (row.enabled !== '1' ? ' ({{ lang._("disabled") }})' : '');
-                    $sel.append($('<option>').val(iface).text(label).attr('data-mode', 'client'));
+                    $sel.append($('<option>').val(iface).text(label)
+                        .attr('data-mode', 'client')
+                        .attr('data-uuid', row.uuid || ''));
                 });
                 ajaxCall('/api/amneziawg/server/search_item', {}, function (srvData) {
                     var servers = (srvData && srvData.rows) ? srvData.rows : [];
@@ -681,7 +735,9 @@
                     servers.forEach(function (row) {
                         var iface = 'awg' + (row.interface_number || '0');
                         var label = iface + ' — ' + (row.name || '') + ' [server]' + (row.enabled !== '1' ? ' ({{ lang._("disabled") }})' : '');
-                        $sel.append($('<option>').val(iface).text(label).attr('data-mode', 'server'));
+                        $sel.append($('<option>').val(iface).text(label)
+                            .attr('data-mode', 'server')
+                            .attr('data-uuid', ''));
                     });
                     if (prev && $sel.find('option[value="' + prev + '"]').length) $sel.val(prev);
                     dfObj.resolve();
@@ -740,6 +796,31 @@
                 $('#diag_netstat_rx').text((data.bytes_in_hr || '0 B') + ' (' + (data.packets_in || 0) + ' pkts)');
                 $('#diag_netstat_tx').text((data.bytes_out_hr || '0 B') + ' (' + (data.packets_out || 0) + ' pkts)');
                 $('#diag_uptime').text(data.uptime || '-');
+
+                var connectivity = data.connectivity || 'unknown';
+                var healthClass = connectivity === 'online' ? 'label-success'
+                    : (connectivity === 'offline' ? 'label-danger'
+                    : (connectivity === 'stopped' ? 'label-default' : 'label-warning'));
+                $('#diag_health_status').html('<span class="label ' + healthClass + '">' + connectivity + '</span>');
+                $('#diag_health_enabled').text(data.health_monitor_enabled ? 'enabled' : 'disabled');
+                $('#diag_health_target').text(data.health_probe_target || data.health_target_configured || '-');
+                $('#diag_health_latency').text(data.health_latency_ms !== null && data.health_latency_ms !== undefined ? data.health_latency_ms + ' ms' : '-');
+                $('#diag_health_failures').text(data.health_failures || 0);
+                $('#diag_health_message').text(data.health_message || '-');
+                $('#diag_assignment').text(data.assignment ? data.assignment + (data.assignment_enabled ? ' (enabled)' : ' (disabled)') : '-');
+                $('#diag_gateway_sync').text(data.gateway_health_sync_enabled ? (data.gateway_sync_ready ? 'enabled / ready' : 'enabled / not ready') : 'disabled');
+                $('#diag_gateway').text(data.native_gateway_name
+                    ? data.native_gateway_name + ' (' + (data.native_gateway_address || '-') + ')'
+                    : (data.native_gateway_ambiguous ? 'ambiguous' : '-'));
+                $('#diag_gateway_monitor').text(data.native_gateway_name
+                    ? (data.native_gateway_monitor_disabled ? 'disabled (plugin health source)' : 'enabled')
+                    : '-');
+                $('#diag_gateway_force').text(data.native_gateway_name
+                    ? (data.native_gateway_force_down ? 'forced down' : 'up')
+                    : '-');
+                $('#diag_gateway_status').text(data.native_gateway_status_text || data.native_gateway_status || '-');
+                $('#diag_pf_route').text(data.pf_route_to_present ? 'present' : 'not found');
+                $('#btnHealthProbe').prop('disabled', !selectedDiagUuid());
             });
         }
 
@@ -768,6 +849,48 @@
 {% endif %}
         $('#btnDiagRefresh').click(function () {
             loadDiagnostics();
+        });
+
+        $('#btnHealthProbe').click(function () {
+            var uuid = selectedDiagUuid();
+            if (!uuid) {
+                return;
+            }
+            var $btn = $(this).prop('disabled', true);
+            $.ajax({
+                url: '/api/amneziawg/service/health/' + uuid,
+                type: 'POST',
+                dataType: 'json',
+                timeout: 10000,
+                success: function (data) {
+                    if (!data) {
+                        alert("{{ lang._('Health probe failed') }}");
+                    } else if (data.result === 'failed') {
+                        BootstrapDialog.show({
+                            type: BootstrapDialog.TYPE_WARNING,
+                            title: "{{ lang._('Health probe') }}",
+                            message: $('<div>').text(data.message || "{{ lang._('Health probe failed') }}").html(),
+                            buttons: [{label: "{{ lang._('Close') }}", action: function(d){ d.close(); }}]
+                        });
+                    } else if (data.result === 'waiting') {
+                        BootstrapDialog.show({
+                            type: BootstrapDialog.TYPE_INFO,
+                            title: "{{ lang._('Health probe') }}",
+                            message: $('<div>').text(data.message || "{{ lang._('Health probe is waiting for routing') }}").html(),
+                            buttons: [{label: "{{ lang._('Close') }}", action: function(d){ d.close(); }}]
+                        });
+                    } else if (data.result !== 'ok') {
+                        alert(data.message || "{{ lang._('Health probe failed') }}");
+                    }
+                    loadDiagnostics();
+                },
+                error: function () {
+                    alert("{{ lang._('Health probe request failed') }}");
+                },
+                complete: function () {
+                    $btn.prop('disabled', !selectedDiagUuid());
+                }
+            });
         });
 
 
@@ -898,6 +1021,7 @@
     <div id="general" class="tab-pane fade in{% if section == 'general' %} active{% endif %}"{% if section != 'general' %} style="display:none;"{% endif %}>
         <div style="padding: 10px 15px 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;">
             <span id="badge_awg" class="label label-default">awg: ...</span>
+            <span id="badge_health" class="label label-default" title="">health: ...</span>
             <span style="margin-left: 4px; border-left: 1px solid #ddd; padding-left: 8px; display: inline-flex; gap: 4px;">
                 <button id="btnStart" class="btn btn-xs btn-success" title="{{ lang._('Start all enabled tunnels') }}"><i class="fa fa-play"></i> {{ lang._('Start') }}</button>
                 <button id="btnStop" class="btn btn-xs btn-danger" title="{{ lang._('Stop all tunnels') }}"><i class="fa fa-stop"></i> {{ lang._('Stop') }}</button>
@@ -914,6 +1038,9 @@
                         title="{{ lang._('Tunnel to inspect') }}"></select>
                 <button id="btnDiagRefresh" class="btn btn-sm btn-default">
                     <i class="fa fa-refresh"></i> {{ lang._('Refresh') }}
+                </button>
+                <button id="btnHealthProbe" class="btn btn-sm btn-default">
+                    <i class="fa fa-heartbeat"></i> {{ lang._('Test Health') }}
                 </button>
                 <button id="btnValidate" class="btn btn-sm btn-default">
                     <i class="fa fa-check-circle"></i> {{ lang._('Validate Config') }}
@@ -939,6 +1066,24 @@
                     <tr><td>{{ lang._('Public Key') }}</td><td id="diag_pubkey" style="word-break:break-all;">-</td></tr>
                     <tr><td>{{ lang._('Listen Port') }}</td><td id="diag_listen_port">-</td></tr>
                     <tr><td>{{ lang._('Uptime') }}</td><td id="diag_uptime">-</td></tr>
+                </tbody>
+                <thead>
+                    <tr><th colspan="2">{{ lang._('Health / Native Gateway') }}</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>{{ lang._('Health Monitor') }}</td><td id="diag_health_enabled">-</td></tr>
+                    <tr><td>{{ lang._('Connectivity') }}</td><td id="diag_health_status">-</td></tr>
+                    <tr><td>{{ lang._('Probe Target') }}</td><td id="diag_health_target">-</td></tr>
+                    <tr><td>{{ lang._('Latency') }}</td><td id="diag_health_latency">-</td></tr>
+                    <tr><td>{{ lang._('Consecutive Failures') }}</td><td id="diag_health_failures">-</td></tr>
+                    <tr><td>{{ lang._('Health Message') }}</td><td id="diag_health_message">-</td></tr>
+                    <tr><td>{{ lang._('OPNsense Assignment') }}</td><td id="diag_assignment">-</td></tr>
+                    <tr><td>{{ lang._('Gateway Health Sync') }}</td><td id="diag_gateway_sync">-</td></tr>
+                    <tr><td>{{ lang._('Native Gateway') }}</td><td id="diag_gateway">-</td></tr>
+                    <tr><td>{{ lang._('Native Gateway Monitoring') }}</td><td id="diag_gateway_monitor">-</td></tr>
+                    <tr><td>{{ lang._('Force Down') }}</td><td id="diag_gateway_force">-</td></tr>
+                    <tr><td>{{ lang._('Gateway Status') }}</td><td id="diag_gateway_status">-</td></tr>
+                    <tr><td>{{ lang._('PF route-to') }}</td><td id="diag_pf_route">-</td></tr>
                 </tbody>
                 <thead>
                     <tr><th colspan="2">{{ lang._('Peer') }}</th></tr>

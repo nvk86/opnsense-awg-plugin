@@ -214,6 +214,130 @@ function awg_interface_mode(string $iface): string
     return 'unknown';
 }
 
+/**
+ * Resolve client model metadata for diagnostics.
+ */
+function awg_client_for_iface(string $iface): ?array
+{
+    $config = OPNsense\Core\Config::getInstance()->object();
+    foreach (($config->OPNsense->amneziawg->instances->instance ?? []) as $inst) {
+        $raw = trim((string)($inst->interface_number ?? ''));
+        $candidate = 'awg' . ($raw === '' ? '0' : (string)(int)$raw);
+        if ($candidate === $iface) {
+            return ['uuid' => (string)$inst['uuid'], 'node' => $inst];
+        }
+    }
+    return null;
+}
+
+function awg_assignment_info(string $iface): array
+{
+    $config = OPNsense\Core\Config::getInstance()->object();
+    if (!isset($config->interfaces)) {
+        return ['key'=>'','descr'=>'','enabled'=>false,'gateway_interface'=>false];
+    }
+    foreach ($config->interfaces->children() as $key => $ifcfg) {
+        if ((string)($ifcfg->if ?? '') !== $iface) {
+            continue;
+        }
+        return [
+            'key' => (string)$key,
+            'descr' => (string)($ifcfg->descr ?? $key),
+            'enabled' => (string)($ifcfg->enable ?? '0') === '1',
+            'gateway_interface' => (string)($ifcfg->gateway_interface ?? '0') === '1',
+        ];
+    }
+    return ['key'=>'','descr'=>'','enabled'=>false,'gateway_interface'=>false];
+}
+
+function awg_native_gateway_info(string $assignment, string $preferred = ''): array
+{
+    $result = [
+        'name'=>'','address'=>'','force_down'=>false,'monitor_disabled'=>false,
+        'is_far'=>false,'status'=>'','status_text'=>'','ambiguous'=>false,
+    ];
+    if ($assignment === '') {
+        return $result;
+    }
+    try {
+        $model = new OPNsense\Routing\Gateways();
+        $rows = [];
+        foreach ($model->gatewayIterator() as $row) {
+            if (($row['interface'] ?? '') !== $assignment || ($row['ipprotocol'] ?? 'inet') !== 'inet') {
+                continue;
+            }
+            $address = trim((string)($row['gateway'] ?? ''));
+            if ($address === '' || strtolower($address) === 'dynamic'
+                || filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+                continue;
+            }
+            if ($preferred !== '' && $address === $preferred) {
+                $rows = [$row];
+                break;
+            }
+            $rows[] = $row;
+        }
+        if (count($rows) > 1) {
+            $result['ambiguous'] = true;
+            return $result;
+        }
+        if (count($rows) === 1) {
+            $row = $rows[0];
+            $result['name'] = (string)($row['name'] ?? '');
+            $result['address'] = trim((string)($row['gateway'] ?? ''));
+            $result['force_down'] = !empty($row['force_down']) && (string)$row['force_down'] !== '0';
+            $result['monitor_disabled'] = !empty($row['monitor_disable']) && (string)$row['monitor_disable'] !== '0';
+            $result['is_far'] = !empty($row['fargw']) && (string)$row['fargw'] !== '0';
+
+            if ($result['name'] !== '') {
+                $out=[]; $rc=1;
+                exec('/usr/local/opnsense/scripts/routes/gateway_status.php 2>/dev/null', $out, $rc);
+                if ($rc === 0) {
+                    $all = json_decode(implode("\n", $out), true);
+                    if (is_array($all) && isset($all[$result['name']])) {
+                        $result['status'] = (string)($all[$result['name']]['status'] ?? '');
+                        $result['status_text'] = (string)($all[$result['name']]['status_translated'] ?? '');
+                    }
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        // Diagnostics remain usable even if routing state cannot be read.
+    }
+    return $result;
+}
+
+function awg_health_info(string $uuid): array
+{
+    if ($uuid === '') {
+        return [];
+    }
+    $path = '/var/run/amneziawg-health-' . $uuid . '.json';
+    if (!is_file($path)) {
+        return [];
+    }
+    $data = json_decode((string)@file_get_contents($path), true);
+    return is_array($data) ? $data : [];
+}
+
+function awg_pf_route_info(string $iface): array
+{
+    $found = false;
+    $lines = [];
+    foreach ([['/sbin/pfctl -sr 2>/dev/null','pfctl -sr'], ['/sbin/pfctl -vvsr 2>/dev/null','pfctl -vvsr']] as $probe) {
+        $out=[]; $rc=1; exec($probe[0], $out, $rc);
+        if ($rc !== 0) continue;
+        foreach ($out as $line) {
+            if (stripos($line, 'route-to') !== false && preg_match('/\b' . preg_quote($iface, '/') . '\b/i', $line)) {
+                $found = true;
+                if (count($lines) < 5) $lines[] = trim($line);
+            }
+        }
+        if ($found) break;
+    }
+    return ['present'=>$found, 'rules'=>$lines];
+}
+
 // ── Main ──
 $iface = awg_get_interface_name($argv[1] ?? null);
 $ifStatus = awg_iface_status($iface);
@@ -221,6 +345,33 @@ $awgData = awg_show($iface);
 $netstat = awg_netstat($iface);
 $uptime = awg_uptime($iface);
 $mode = awg_interface_mode($iface);
+
+$client = awg_client_for_iface($iface);
+$uuid = (string)($client['uuid'] ?? '');
+$inst = $client['node'] ?? null;
+$assignment = awg_assignment_info($iface);
+$healthMonitor = $inst !== null && (string)($inst->health_monitor ?? '0') === '1';
+$gatewaySync = $inst !== null && (string)($inst->gateway_health_sync ?? '0') === '1';
+$healthTarget = $inst !== null ? trim((string)($inst->health_target ?? '')) : '';
+$gateway = awg_native_gateway_info((string)$assignment['key'], $healthTarget);
+$health = awg_health_info($uuid);
+$checked = (int)($health['checked_at'] ?? 0);
+$age = $checked > 0 ? max(0, time() - $checked) : null;
+if (!$ifStatus['running']) {
+    $connectivity = 'stopped';
+} elseif ($checked <= 0) {
+    $connectivity = 'waiting';
+} elseif (($health['status'] ?? '') === 'stopped') {
+    // Runtime is up, so a cached stopped state predates the latest start.
+    $connectivity = 'waiting';
+} elseif (($health['status'] ?? '') === 'waiting') {
+    $connectivity = 'waiting';
+} elseif ($age !== null && $age > 150) {
+    $connectivity = 'stale';
+} else {
+    $connectivity = !empty($health['online']) ? 'online' : 'offline';
+}
+$pf = awg_pf_route_info($iface);
 
 echo json_encode([
     'interface'          => $iface,
@@ -245,4 +396,33 @@ echo json_encode([
     'persistent_keepalive' => $awgData['persistent_keepalive'],
     'peers'              => $awgData['peers'],
     'uptime'             => $uptime,
+    'instance_uuid'      => $uuid,
+    'health_monitor_enabled' => $healthMonitor,
+    'health_target_configured' => $healthTarget,
+    'connectivity'       => $connectivity,
+    'health_message'     => (string)($health['message'] ?? ''),
+    'health_checked_at'  => $checked > 0 ? $checked : null,
+    'health_latency_ms'  => isset($health['latency_ms']) && $health['latency_ms'] !== null ? (int)$health['latency_ms'] : null,
+    'health_failures'    => (int)($health['consecutive_failures'] ?? 0),
+    'health_probe_target'=> (string)($health['target'] ?? ($healthTarget !== '' ? $healthTarget : $gateway['address'])),
+    'health_source'      => (string)($health['source'] ?? ''),
+    'health_last_restart'=> isset($health['last_restart']) ? (int)$health['last_restart'] : null,
+    'assigned'           => $assignment['key'] !== '',
+    'assignment'         => $assignment['key'],
+    'assignment_descr'   => $assignment['descr'],
+    'assignment_enabled' => $assignment['enabled'],
+    'dynamic_gateway_policy' => $assignment['gateway_interface'],
+    'gateway_health_sync_enabled' => $gatewaySync,
+    'gateway_sync_ready' => $mode === 'client' && $assignment['key'] !== '' && $assignment['enabled']
+        && $gateway['name'] !== '' && $gateway['monitor_disabled'] && !$gateway['ambiguous'],
+    'native_gateway_name'=> $gateway['name'],
+    'native_gateway_address' => $gateway['address'],
+    'native_gateway_force_down' => $gateway['force_down'],
+    'native_gateway_monitor_disabled' => $gateway['monitor_disabled'],
+    'native_gateway_is_far' => $gateway['is_far'],
+    'native_gateway_ambiguous' => $gateway['ambiguous'],
+    'native_gateway_status' => $gateway['status'],
+    'native_gateway_status_text' => $gateway['status_text'],
+    'pf_route_to_present' => $pf['present'],
+    'pf_route_to_rules' => $pf['rules'],
 ]) . "\n";

@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.1.0 — 2026-09-19
+
+- Added opt-in per-client active ICMP data-plane health monitoring. The probe is sourced from the AWG tunnel address and defaults to the native OPNsense gateway on the assigned AWG interface.
+- Added per-client **Health Monitor**, **Health Probe Target**, and **Gateway Health Sync** controls to the client editor.
+- Added native OPNsense gateway health synchronization: after three consecutive failed probes the adopted gateway is marked `Force Down`, OPNsense routing is reconfigured, and the next successful probe restores it.
+- Existing gateways remain user-owned. The plugin records and restores their original `Force Down` value when synchronization is released; it never creates or deletes AWG gateways.
+- Native gateway monitoring must be disabled while Gateway Health Sync is active so plugin health is the single gateway-health source.
+- Extended the watchdog to restart only the unhealthy client after the same three-failure threshold, with a 10-minute restart cooldown. Active health and gateway synchronization continue to work when automatic restart is disabled.
+- After a watchdog restart, the invalidated pre-restart health cache is rebuilt as `waiting` with `last_restart` preserved, so the 10-minute cooldown survives the lifecycle reset and the UI waits for a fresh probe instead of showing stale failures.
+- Added an aggregate **Health** badge to the General page. It shows the worst monitored client state (`online`, `offline 1/3`, `offline 2/3`, `offline`, `waiting`, `stale`, or `stopped`).
+- Added a **Health** column to the Clients grid. Every row is derived only from that client's own UUID health cache, so tunnel health is never copied from the aggregate General status.
+- Added on-demand **Test Health** and health/native-gateway/PF status to Diagnostics.
+- Added cleanup/reconciliation on client deletion and plugin uninstall.
+- Added one-time OPNsense Gateway Watcher cache reconciliation when adopting a gateway after native `dpinger` monitoring is disabled, preventing stale monitor state from masking plugin-driven `Force Down`.
+- Documented Gateway Group integration and the companion `opnsense-xray-plugin` project.
+
+
 ## v2.0.5 — 2026-09-06
 
 - Fixed AWG loader cleanup to handle both `/boot/loader.conf` and `/boot/loader.conf.local`. The installer now backs up and restores both files during rollback, removes stale `if_amn_load`/`if_awg_load` entries from either location, writes the canonical `if_awg_load="YES"` entry to `/boot/loader.conf`, and verifies that no legacy `if_amn_load` entry remains.

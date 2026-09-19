@@ -9,6 +9,6 @@
         <id>general.watchdog</id>
         <label>Enable Watchdog</label>
         <type>checkbox</type>
-        <help>Automatically restart tunnel if it goes down (checks every minute via cron)</help>
+        <help>Automatically repair missing tunnels and restart a monitored client after three consecutive failed active health probes. Gateway Health Sync and health probes can remain active even when automatic restart is disabled.</help>
     </field>
 </form>

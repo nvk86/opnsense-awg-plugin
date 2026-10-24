@@ -55,13 +55,17 @@ jobs:
           PY
           node --check /tmp/general.js
 
+      - name: AWG health reliability regression
+        run: php tests/health_policy_test.php
+
       - name: v2.1.0 health integration
         run: |
-          grep -Fq 'PLUGIN_VERSION="2.3.0"' install.sh
+          grep -Fq 'PLUGIN_VERSION="2.3.1"' install.sh
           grep -Fq '<version>2.1.0</version>' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
           grep -Fq '<health_monitor type="BooleanField">' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
           grep -Fq '<gateway_health_sync type="BooleanField">' plugin/mvc/app/models/OPNsense/AmneziaWG/Instance.xml
           grep -Fq '[health]' plugin/service/conf/actions.d/actions_amneziawg.conf
+          grep -Fq '[health_test]' plugin/service/conf/actions.d/actions_amneziawg.conf
           grep -Fq '[gateway_sync]' plugin/service/conf/actions.d/actions_amneziawg.conf
           grep -Fq '[gateway_sync_state]' plugin/service/conf/actions.d/actions_amneziawg.conf
           grep -Fq '[gateway_sync_release]' plugin/service/conf/actions.d/actions_amneziawg.conf
@@ -87,6 +91,9 @@ jobs:
           grep -Fq "stale service-level stopped flag remained" install.sh
           grep -Fq "\$connectivity = 'waiting'" plugin/scripts/AmneziaWG/amneziawg-ifstats.php
           grep -Fq 'amneziawg-health.php' plugin/scripts/AmneziaWG/amneziawg-watchdog.php
+          grep -Fq 'awg_health_watchdog_restart_eligible' plugin/scripts/AmneziaWG/amneziawg-watchdog.php
+          grep -Fq 'amneziawg health_test ' plugin/mvc/app/controllers/OPNsense/AmneziaWG/Api/ServiceController.php
+          grep -Fq "'.lock.v1', 'ce'" plugin/scripts/AmneziaWG/amneziawg-health.php
           grep -Fq "Tunnel restarted by watchdog; waiting for health recheck" plugin/scripts/AmneziaWG/amneziawg-watchdog.php
           grep -Fq "wdg_mark_restart(\$row['uuid'], \$decoded)" plugin/scripts/AmneziaWG/amneziawg-watchdog.php
           grep -Fq 'Force Down' README.md

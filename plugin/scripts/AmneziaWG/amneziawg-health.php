@@ -3,8 +3,7 @@
 
 set_include_path('/usr/local/etc/inc' . PATH_SEPARATOR . get_include_path());
 require_once('config.inc');
-
-const AWG_HEALTH_TIMEOUT_MS = 1500;
+require_once __DIR__ . '/amneziawg-health-policy.php';
 
 function awg_health_output(array $data, int $rc = 0): void
 {
@@ -302,10 +301,14 @@ function awg_health_sync_gateway(string $uuid, bool $online, int $failures, stri
 
 function awg_health_update(string $uuid, bool $online, string $status, string $message, ?int $latencyMs, array $extra = []): array
 {
+    global $probeOnly;
     $old = awg_health_read_cache($uuid);
     $now = time();
     $inconclusive = in_array($status, ['stopped', 'waiting'], true);
     $failures = $inconclusive ? 0 : ($online ? 0 : ((int)($old['consecutive_failures'] ?? 0) + 1));
+    $kind = (string)($extra['failure_kind'] ?? ($online || $inconclusive ? 'none' : 'network'));
+    $localFailures = (!$online && !$inconclusive && $kind === 'local')
+        ? ((int)($old['consecutive_local_failures'] ?? 0) + 1) : 0;
     $state = array_merge([
         'online' => $online,
         'status' => $status,
@@ -314,18 +317,38 @@ function awg_health_update(string $uuid, bool $online, string $status, string $m
         'checked_at' => $now,
         'checked_at_iso' => date('c', $now),
         'consecutive_failures' => $failures,
+        'consecutive_local_failures' => $localFailures,
+        'failure_kind' => $kind,
         'last_ok' => $online ? $now : ($old['last_ok'] ?? null),
         'last_failure' => (!$online && !$inconclusive) ? $now : ($old['last_failure'] ?? null),
         'last_restart' => $old['last_restart'] ?? null,
     ], $extra);
+    // Manual GUI Test is diagnostic only: never touch the production cache,
+    // failure counters or native gateway Force Down / PF rules.
+    if ($probeOnly) {
+        $state['probe_only'] = true;
+        return $state;
+    }
     awg_health_write_cache($uuid, $state);
     awg_health_sync_gateway($uuid, $online, $failures, $status);
     return $state;
 }
 
-$uuid = isset($argv[1]) ? trim((string)$argv[1]) : '';
+$probeOnly = in_array('--probe-only', array_slice($argv, 1), true);
+$uuidArg = ($argv[1] ?? '') === '--probe-only' ? ($argv[2] ?? '') : ($argv[1] ?? '');
+$uuid = trim((string)$uuidArg);
 if (!awg_health_valid_uuid($uuid)) {
     awg_health_output(['result' => 'failed', 'message' => 'Invalid instance UUID'], 1);
+}
+
+// Serialize only scheduled health producers. The descriptor is close-on-exec
+// so child routing/filterlog helpers cannot inherit a stale flock.
+if (!$probeOnly) {
+    $lock = @fopen('/var/run/amneziawg-health-' . $uuid . '.lock.v1', 'ce');
+    if ($lock === false || !@flock($lock, LOCK_EX | LOCK_NB)) {
+        awg_health_output(['result' => 'busy', 'status' => 'busy', 'online' => null,
+            'message' => 'Health probe already running'], 0);
+    }
 }
 
 $cfg = OPNsense\Core\Config::getInstance()->object();
@@ -341,7 +364,7 @@ $manualStopped = is_file('/var/run/amneziawg_stopped.flag')
     || is_file('/var/run/amneziawg_stopped_' . $iface . '.flag');
 
 if (!$globalEnabled || !$instanceEnabled || $manualStopped) {
-    awg_health_probe_route_cleanup($uuid);
+    if (!$probeOnly) awg_health_probe_route_cleanup($uuid);
     $state = awg_health_update(
         $uuid,
         false,
@@ -356,7 +379,7 @@ if (!$globalEnabled || !$instanceEnabled || $manualStopped) {
 $healthEnabled = (string)($inst->health_monitor ?? '0') === '1'
     || (string)($inst->gateway_health_sync ?? '0') === '1';
 if (!$healthEnabled) {
-    awg_health_probe_route_cleanup($uuid);
+    if (!$probeOnly) awg_health_probe_route_cleanup($uuid);
     awg_health_output([
         'result' => 'skipped',
         'status' => 'disabled',
@@ -370,7 +393,7 @@ $source = awg_health_source_ipv4($inst);
 if ($source === '') {
     $state = awg_health_update($uuid, false, 'offline',
         'No IPv4 tunnel address is configured for the health probe', null,
-        ['interface' => $iface]);
+        ['interface' => $iface, 'failure_kind' => 'config']);
     awg_health_output(['result' => 'failed'] + $state, 0);
 }
 
@@ -388,7 +411,7 @@ exec('/usr/local/bin/awg show ' . escapeshellarg($iface) . ' 2>/dev/null', $show
 if (!$ifaceUp || $showRc !== 0) {
     $state = awg_health_update($uuid, false, 'offline',
         'AWG runtime is not ready on ' . $iface, null,
-        ['interface' => $iface, 'source' => $source]);
+        ['interface' => $iface, 'source' => $source, 'failure_kind' => 'local']);
     awg_health_output(['result' => 'failed'] + $state, 0);
 }
 
@@ -397,7 +420,8 @@ $preferred = trim((string)($inst->health_target ?? ''));
 if ($preferred !== '' && filter_var($preferred, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
     $state = awg_health_update($uuid, false, 'offline',
         'Health Probe Target is not a valid IPv4 address', null,
-        ['interface' => $iface, 'source' => $source, 'target' => $preferred]);
+        ['interface' => $iface, 'source' => $source, 'target' => $preferred,
+            'failure_kind' => 'config']);
     awg_health_output(['result' => 'failed'] + $state, 0);
 }
 
@@ -406,7 +430,7 @@ $target = $preferred !== '' ? $preferred : (string)$gateway['address'];
 if ($target === '') {
     $state = awg_health_update($uuid, false, 'offline',
         $gateway['error'] ?: 'Unable to resolve a health probe target', null,
-        ['interface' => $iface, 'source' => $source]);
+        ['interface' => $iface, 'source' => $source, 'failure_kind' => 'config']);
     awg_health_output(['result' => 'failed'] + $state, 0);
 }
 
@@ -418,7 +442,7 @@ $routeReconciled = false;
 // OPNsense gateway. If the gateway itself is not Force Down, ask OPNsense to
 // rebuild its own route before declaring health inconclusive. This keeps route
 // ownership native to OPNsense and avoids a permanent plugin-created route.
-if (($routeInterface === '' || $routeInterface !== $iface)
+if (!$probeOnly && ($routeInterface === '' || $routeInterface !== $iface)
     && empty($gateway['force_down'])
     && (string)$gateway['name'] !== '') {
     $routeRepair = awg_health_reconcile_gateway_route((string)$gateway['name']);
@@ -432,7 +456,7 @@ if (($routeInterface === '' || $routeInterface !== $iface)
 // Without an independent probe path, health could never observe recovery and
 // clear Force Down. While forced down, install a temporary runtime-only /32
 // route through awgN solely for the health probe.
-if (($routeInterface === '' || $routeInterface !== $iface) && !empty($gateway['force_down'])) {
+if (!$probeOnly && ($routeInterface === '' || $routeInterface !== $iface) && !empty($gateway['force_down'])) {
     $probeRoute = awg_health_probe_route_ensure($uuid, $target, $iface);
     if (!empty($probeRoute['ok'])) {
         $routeInterface = (string)($probeRoute['interface'] ?? $iface);
@@ -462,8 +486,7 @@ if ($routeInterface === '' || $routeInterface !== $iface) {
 $start = microtime(true);
 $out = [];
 $rc = 1;
-$cmd = '/sbin/ping -4 -n -c 1 -o -W ' . AWG_HEALTH_TIMEOUT_MS
-    . ' -S ' . escapeshellarg($source) . ' ' . escapeshellarg($target) . ' 2>&1';
+$cmd = awg_health_ping_command($source, $target);
 exec($cmd, $out, $rc);
 $latency = null;
 if ($rc === 0) {
@@ -504,7 +527,7 @@ if ($rc !== 0) {
 }
 
 $message = 'Online via ' . $iface . ' (' . $target . ', ' . $latency . ' ms)';
-if (!empty(awg_health_probe_route_read($uuid))) {
+if (!$probeOnly && !empty(awg_health_probe_route_read($uuid))) {
     awg_health_probe_route_cleanup($uuid);
     $extra['probe_route_owned'] = false;
 }

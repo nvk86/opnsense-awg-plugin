@@ -1,10 +1,10 @@
 #!/bin/sh
-# opnsense-awg v2.3.0 installer
+# opnsense-awg v2.3.1 installer
 # Migrates the legacy FreeBSD amnezia-kmod/amnezia-tools AWG2 stack to the
 # project-owned AWG 3.1 packages, preserving OPNsense configuration and keys.
 set -eu
 
-PLUGIN_VERSION="2.3.0"
+PLUGIN_VERSION="2.3.1"
 KMOD_REPO="nvk86/opnsense-awg-kmod"
 TOOLS_REPO="nvk86/opnsense-awg-tools"
 KMOD_VERSION=""
@@ -298,6 +298,7 @@ postflight(){
     /usr/local/bin/awg --version 2>/dev/null | grep -q "$_tools_upstream" || die "Unexpected awg userspace version"
     grep -q '\[testconnect\]' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf && die "Obsolete testconnect action is still installed"
     grep -q '^\[health\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Health action missing after install"
+    grep -q '^\[health_test\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Read-only health test action missing after install"
     grep -q '^\[gateway_sync\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync action missing after install"
     grep -q '^\[gateway_sync_state\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync state action missing after install"
     grep -q '^\[gateway_sync_release\]$' /usr/local/opnsense/service/conf/actions.d/actions_amneziawg.conf || die "Gateway sync release action missing after install"

@@ -25,23 +25,26 @@ AmneziaWG is a WireGuard-compatible VPN protocol with additional traffic obfusca
 
 > This is a third-party community plugin. It is not an official OPNsense or AmneziaVPN component.
 
-## What's new in 2.3.0
+## Contents
 
-Version **2.3.0** consolidates the active health and gateway failover work from 2.1.x, the UI/UX improvements from 2.2.0, and adds native read-only Prometheus telemetry.
+- **Overview:** [What's new in 2.3.1](#whats-new-in-231) · [Features](#what-the-plugin-provides) · [Requirements](#requirements)
+- **Installation & Upgrades:** [Installer and packages](#installer-and-package-handling) · [Installation](#installation) · [Updating](#updating) · [Removing](#removing)
+- **Client VPN:** [Client configuration](#client-configuration) · [Health & Gateway Sync](#active-health-monitoring-and-gateway-health-sync) · [Outbound NAT](#outbound-nat-for-internet-breakout) · [Policy routing](#route-selected-traffic-through-awg)
+- **Server VPN:** [Server configuration](#server-configuration) · [Server Peers](#add-server-peers) · [Firewall and routing](#firewall-and-routing-for-server-mode)
+- **Monitoring & Diagnostics:** [Prometheus metrics](#prometheus-metrics) · [Useful commands](#useful-commands) · [File locations](#important-file-locations)
 
-- **Active per-client health monitoring** verifies the real AWG data plane with ICMP probes instead of treating an existing interface as proof of connectivity.
-- **Gateway Health Sync** feeds debounced tunnel health into the native OPNsense gateway **Force Down** state, allowing Gateway Groups and policy routing to fail over without `dpinger`.
-- After three consecutive failed probes the affected gateway is forced down; the optional watchdog can restart only that client with a 10-minute per-client cooldown, and the next successful probe restores the gateway.
-- The 2.1.1 route-recovery fix is included: after an `awgN` interface is recreated, health can ask OPNsense to reconcile the native gateway host route before probing. The plugin still does not take permanent ownership of that route.
-- The interface includes the 2.2.0 UI/UX refresh: clearer aggregate status and diagnostics, improved client/server/peer actions and provisioning, structured service/watchdog log views, and clearer help text across configuration fields.
-- Added `GET /api/amneziawg/service/metrics` using the Prometheus text exposition format.
-- Prometheus exposes service state, client/server runtime state, cached active-health state, latency/failure timestamps, watchdog state, Gateway Health Sync state and handshake timestamps.
-- Scraping is passive: the endpoint reads existing runtime and health-cache state and never starts a health probe or changes tunnel/gateway state.
-- Added a dedicated **AmneziaWG: Prometheus metrics** ACL privilege for monitoring-only API users.
-- Metric labels are intentionally limited to configured tunnel name and interface; keys, peer endpoints, health targets and internal UUIDs are not exported.
-- Runtime inventory failures are exported explicitly so a successful HTTP scrape cannot hide an unavailable backend inventory.
+## What's new in 2.3.1
 
-Existing 2.2.0 clients, servers, peers, keys, gateways, health settings and policy-routing configuration are preserved.
+Version **2.3.1** improves active health monitoring reliability and prevents unnecessary tunnel restarts caused by temporary connectivity failures.
+
+- **Improved ICMP health checks:** Each monitoring cycle allows up to two tunnel-bound ICMP attempts, stopping after the first successful reply to reduce false negatives from isolated packet loss.
+- **Safer watchdog behavior:** Automatic tunnel restarts require three consecutive local runtime failures. Remote ICMP timeouts alone no longer trigger restarts.
+- **Gateway Health Sync:** The existing three-failure debounce remains in place. A successful probe restores gateway availability.
+- **Read-only manual Test:** Running a health check from the GUI no longer modifies production failure counters, health cache, gateway state or routing.
+- **Reliable health-check locking:** Per-client locking prevents overlapping scheduled probes and avoids inherited locks in OPNsense service processes.
+- **Regression tests:** Added automated tests for health-check behavior and watchdog restart decisions.
+
+**Upgrade from 2.3.0:** Run `sh install.sh`. The installer preserves existing configuration and restores previously running tunnels. It also checks the latest supported AWG kernel module and tools packages, reinstalls them, and restarts managed AWG interfaces during the upgrade.
 
 See [RELEASE_NOTES.md](RELEASE_NOTES.md) and [Changelog.md](Changelog.md) for the detailed release history.
 
@@ -93,12 +96,12 @@ The original copyright notice and BSD 2-Clause License are retained in [LICENSE]
 - The watchdog repairs only the failed managed instance instead of restarting every tunnel.
 - Optional per-client active health probes verify the AWG data plane instead of treating an existing interface or sentinel PID as proof of connectivity.
 - Optional **Gateway Health Sync** mirrors verified client health into a native OPNsense gateway `Force Down` state, allowing Gateway Groups to fail over without `dpinger`.
-- Three consecutive failed probes assert `Force Down`; when the global Watchdog is enabled the affected client tunnel is also restarted with a 10-minute restart cooldown. The next successful probe clears `Force Down`.
+- Three consecutive unsuccessful scheduled probe cycles assert `Force Down`; the next successful probe clears it. The watchdog restarts only an affected client with three consecutive **local runtime failures**, subject to a 10-minute restart cooldown. ICMP timeouts alone do not restart a healthy local tunnel.
 - A live `awgN` interface without the expected plugin-owned canonical config is treated as unmanaged and is not taken over blindly.
 
 ## Installer and package handling
 
-The v2.3.0 installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
+The installer uses the project-owned AWG 3.x packages and no longer upgrades AWG from the FreeBSD quarterly repository. At install/update time it resolves the latest GitHub release independently for `opnsense-awg-kmod` and `opnsense-awg-tools`, and requires each package to remain in supported major version 3. The kmod and tools version numbers are intentionally allowed to differ because kernel-only and userspace-only upstream updates are released independently.
 
 Current supported package releases:
 
@@ -202,7 +205,7 @@ The public VPS address belongs in the AmneziaWG `Endpoint`; it is **not** the OP
 
 ### Active health monitoring and Gateway Health Sync
 
-Version 2.1.0 can monitor a client with a real ICMP probe sourced from the client's AWG tunnel address.
+Active health monitoring uses up to two ICMP attempts per cycle, sourced from the selected AWG client's tunnel address. The probe stops after the first successful reply. The GUI **Test Health** action is diagnostic only and does not change production health counters, native gateway state or routing.
 
 In **VPN → AmneziaWG → Clients**, edit a client and use:
 
@@ -224,7 +227,7 @@ For **Gateway Health Sync**:
 
 The plugin adopts the existing gateway; it does not replace it. It records the gateway's original `Force Down` value and restores that value when synchronization is disabled, the client is deleted, or the plugin is removed.
 
-A first or second failed probe is treated as transient. On the third consecutive failure the synchronized gateway is forced down and OPNsense's normal routing alarm path rebuilds Gateway Groups/PF policy. The next successful probe clears `Force Down`. If the global **Watchdog** is enabled, the same three-failure threshold also restarts only the affected `awgN` client, with a 10-minute cooldown.
+A first or second unsuccessful scheduled health-check cycle is treated as transient. On the third consecutive unsuccessful cycle the synchronized gateway is forced down and OPNsense's normal routing alarm path rebuilds Gateway Groups/PF policy. The next successful probe clears `Force Down`. When the global **Watchdog** is enabled, a tunnel restart requires **three consecutive local runtime failures**, not merely unanswered ICMP probes; the 10-minute cooldown remains in place.
 
 Native `dpinger` remains available when Gateway Health Sync is not used; the two health sources should not control the same gateway at the same time.
 
@@ -232,7 +235,7 @@ The **General** page shows one aggregate health badge for monitored clients. It 
 
 The **Clients** page also shows a per-client **Health** column. Each row is read only from that tunnel's UUID-specific health cache, so one failed client does not change another client's row. Detailed latency, target, failures, gateway state and PF status remain in **Diagnostics**.
 
-When an existing gateway is moved from `dpinger` to plugin health, 2.1.0 performs a one-time Gateway Watcher reconciliation. This clears any cached pre-disable `dpinger` state that could otherwise mask a newly asserted `Force Down` during PF/Gateway Group regeneration. The reconciliation is recorded per adopted gateway and is not repeated on every health check.
+When an existing gateway is moved from `dpinger` to plugin health, the plugin performs a one-time Gateway Watcher reconciliation. This clears any cached pre-disable `dpinger` state that could otherwise mask a newly asserted `Force Down` during PF/Gateway Group regeneration. The reconciliation is recorded per adopted gateway and is not repeated on every health check.
 
 ### Outbound NAT for Internet breakout
 
@@ -325,7 +328,7 @@ This keeps the VPN service lifecycle separate from OPNsense security policy.
 
 ## Updating
 
-Run the `install.sh` from the new release directory as root. The v2.1.0 installer is also the migration path from v1.0.0/AWG2; do not manually replace the kernel module or userspace binaries first.
+Run `sh install.sh` from the new release directory as root. The installer also supports migration from legacy v1.0.0/AWG2 installations; do not manually replace the kernel module or userspace binaries first.
 
 The installer resolves the latest supported AWG 3.x release from each package repository independently on every install/repair run. It downloads each package's matching `.pkg.sha256` asset, verifies hashes and manifests before mutation, and does not require the kmod and tools version strings to match. A kernel-only update therefore requires only a new kmod release, and a tools-only update requires only a new tools release.
 
@@ -400,6 +403,7 @@ plugin/
 ├── scripts/AmneziaWG/
 │   ├── amneziawg-service-control.php
 │   ├── amneziawg-health.php
+│   ├── amneziawg-health-policy.php
 │   ├── amneziawg-gateway-sync.php
 │   ├── amneziawg-watchdog.php
 │   ├── amneziawg-ifstats.php

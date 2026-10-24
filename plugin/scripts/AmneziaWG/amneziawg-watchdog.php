@@ -10,6 +10,7 @@
 // depend on automatic tunnel restart being enabled.
 
 require_once('/usr/local/etc/inc/config.inc');
+require_once __DIR__ . '/amneziawg-health-policy.php';
 
 define('AWG_PID_FILE', '/var/run/amneziawg.pid');
 define('AWG_STOPPED_FLAG', '/var/run/amneziawg_stopped.flag');
@@ -59,6 +60,8 @@ function wdg_mark_restart(string $uuid, array $previous = []): void
     $state['checked_at'] = $now;
     $state['checked_at_iso'] = date('c', $now);
     $state['consecutive_failures'] = 0;
+    $state['consecutive_local_failures'] = 0;
+    $state['failure_kind'] = 'none';
     $state['last_restart'] = $now;
 
     $tmp = $path . '.tmp.' . getmypid();
@@ -193,7 +196,7 @@ foreach ($clientRows as $row) {
     $message = (string)($decoded['message'] ?? '');
     $healthSummaries[] = $row['iface'] . ':' . $status;
 
-    if ($status === 'online' || $status === 'waiting') {
+    if (in_array($status, ['online', 'waiting', 'busy'], true)) {
         continue;
     }
 
@@ -203,7 +206,8 @@ foreach ($clientRows as $row) {
     }
 
     if (!$watchdogEnabled || !$serviceEnabled || $serviceStopped
-        || $row['manual_stopped'] || !$kmodLoaded || $failures < 3) {
+        || $row['manual_stopped'] || !$kmodLoaded
+        || !awg_health_watchdog_restart_eligible($decoded)) {
         continue;
     }
 

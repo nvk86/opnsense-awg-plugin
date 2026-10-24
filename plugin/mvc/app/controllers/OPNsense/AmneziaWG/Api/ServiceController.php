@@ -380,7 +380,7 @@ class ServiceController extends ApiMutableServiceControllerBase
         }
 
         $backend = new Backend();
-        $output = trim((string)$backend->configdRun('amneziawg health ' . $uuid));
+        $output = trim((string)$backend->configdRun('amneziawg health_test ' . $uuid));
         if ($output === '') {
             return ['result' => 'failed', 'message' => 'No response from health probe'];
         }

@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.3.1 — 2026-10-24
+
+- Improved tunnel-bound ICMP probes: up to two attempts per cycle, stopping on the first success.
+- Split local runtime failure counts from network timeouts and configuration errors.
+- Prevented watchdog restarts due solely to remote ICMP timeouts; three consecutive local runtime failures and the 10-minute cooldown remain required for automatic client restart.
+- Retained the existing three-failure Gateway Health Sync debounce, with native gateway restoration upon recovery.
+- Added a read-only manual GUI Test action that does not modify production health cache, counters, native gateway state or runtime routes.
+- Serialized production probes per UUID with nonblocking close-on-exec locks to prevent overlapping runs and inherited locks.
+- Added health-policy regression tests and CI checks.
+- Updated README with the approved 2.3.1 release summary, grouped contents and health-monitoring guidance.
+
 ## v2.3.0 — 2026-09-19
 
 - Added native read-only Prometheus exposition at `/api/amneziawg/service/metrics`.
